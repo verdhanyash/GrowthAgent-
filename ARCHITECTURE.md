@@ -420,6 +420,11 @@ Parallel deep-design produced seven specs; these normalizations are decided HERE
 | Priority actions | PUSH_ITEM/BUILD_BUNDLE/… vs PRIORITIZE_IN_BUNDLES/… | **PRIORITIZE_IN_BUNDLES · CLEAR_NEAR_EXPIRY · PROMOTE_PAIR** (campaign.md producer schema) |
 | Citation verdicts | CLEAN/STRIPPED/FAILED vs richer per-claim statuses | **CLEAN/STRIPPED/FAILED overall** + per-claim violation codes (negotiation.md) |
 | Money in PG | int vs bigint | **BIGINT paise** columns, TS `number` (safe-integer-guarded) |
+| Escalation band edges | §8.5 "both edges inclusive" vs §13 rows 2/7 pinning exactly-at-cap → PASS | **Band = `[lowerEdge, cap)`** — lower inclusive, upper EXCLUSIVE; at-or-over cap is hard FAIL. Implemented identically in `cartValue.ts` / `discountCap.ts` (M1) |
+| FAIL reason codes on escalation-class rules | §4 sketch types `FAIL.reason_code: DeclineCode`, but RULES-NOT-EFFECTIVE / TOTALS_DRIFT_MATERIAL fail non-blocker rules | **`FAIL.reason_code` widened to `DeclineCode \| EscalationCode`** in the registry type — aggregation still keys off severity × status, not the code namespace (M1) |
+| expected/actual fields | §13 matrix pins `expected`/`actual` strings on PASS and BAND rows too; §4 sketch only carried them on FAIL | **Optional `expected`/`actual` added to PASS/BAND/ESCALATE_TRIGGER/UNAVAILABLE_INPUT verdict variants** (M1) |
+| repeatOffender with UNAVAILABLE velocity | §6 leaves SKIP vs UNAVAILABLE_INPUT open; UNAVAILABLE_INPUT would duplicate VELOCITY_UNAVAILABLE's escalation cause | **UNAVAILABLE → SKIP**, decision recorded in the trace entry per I-4 (M1) |
+| NaN defense ordering | §10 NAN-DEFENSE requires fail-closed, but context math could crash before rules ran | **`structurallyValid` guard in buildContext**: invalid carts zero all money math so no rule ever sees hostile numerics; GK-CART-STRUCTURE delivers the FAIL (M1) |
 
 ---
 
