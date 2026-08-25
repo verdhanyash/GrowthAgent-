@@ -100,6 +100,22 @@ export type {
   SuppressionReason,
 } from "./campaign/audit-events.js";
 
+/* catalog-intelligence contracts (data-model-audit.md §2.5, negotiation §1.7) */
+export { CATALOG_CONFIG } from "./catalog/config.js";
+export {
+  EnrichedSkuSchema,
+  EnrichmentStatus,
+  EnrichmentOutputZ,
+  type EnrichedSku,
+  type EnrichmentOutput,
+} from "./catalog/schema.js";
+export {
+  normalizeEnrichment,
+  type SanitizedEnrichment,
+  type RejectedEnrichment,
+  type EnrichmentWarning,
+} from "./catalog/normalize.js";
+
 /* SSE audit-event envelope + taxonomy (frontend-events.md §1) */
 export {
   TxId,

@@ -293,3 +293,90 @@ adjudication.
 
 ---
 
+## M4 — Catalog-intelligence agent (LLM #3 of 4) — 2026-08-26
+
+**The messy-text cleaner**: raw merchant catalog rows → clean marketing copy,
+per `data-model-audit.md` §2.5 + negotiation.md §1.7's trust rule. The agent
+with the smallest output surface and the strictest structural leash: everything it
+writes lands in a table that physically has no commercial column.
+
+### Built
+
+- **Schemas** (`shared/src/catalog/schema.ts`): dual-track zod again — validation-only
+  v3 `EnrichedSkuSchema` mirroring the catalog_enriched row WITH the two SQL CHECK
+  constraints reproduced as superRefine (`ce_model_required`: ENRICHED ⇒ model +
+  display_name; `ce_failed_has_reason`: FAILED ⇒ error_detail), so a TS write PG would
+  reject fails at the seam. LLM-facing `EnrichmentOutputZ` on zod/v4 strictObject —
+  prose + tags only; the sole number is confidence ∈ [0,1], which is not money.
+- **Config** (`shared/src/catalog/config.ts`): closed occasion vocabulary
+  {birthday, anniversary, diwali, rakhi, congrats}, field caps mirroring §2.5 columns,
+  ladder knobs (attempts=2, backoff 500ms, injectable timing).
+- **Pure normalizer** (`shared/src/catalog/normalize.ts`): PARTIAL ACCEPT policy —
+  unknown occasions dropped + `UNKNOWN_OCCASION:<raw>` warning; pairings allow-listed
+  against the merchant's real SKUs case-insensitively (canonical casing wins) with
+  `PAIRING_NOT_IN_CATALOG`; tags lowercased/deduped/capped with `TAGS_TRUNCATED`;
+  money-flavored prose flagged `MONEY_TOKEN_IN_COPY` but KEPT (no numeric column
+  exists to feed — a loud warning beats silent mutation); model warnings ride through
+  prefixed. Only blank display_name/description hard-reject → UNENRICHED path.
+- **Prompt layer** (`api/src/catalog/prompts.ts`): frozen data-free system prompt
+  (closed vocabulary + "NEVER mention prices" contract; zero seed-data examples after
+  freeze-test caught the typo example leaking PSTRY-BSC's name). THE TRUST RULE AT THE
+  SOURCE: `CatalogItemInput` carries sku/name_raw/description_raw/uom_raw/category_raw
+  ONLY — cost, list price, stock, expiry are not fields, so no code path can transmit
+  them. Deterministic request body + sha256 replay key.
+- **Live port** (`live-claude.enrichment.ts`): one messages.parse per SKU
+  (llm_calls.purpose='enrich_sku', offline — tx_id NULL), claude-opus-5, adaptive
+  thinking, cached system block, client maxRetries: 0.
+- **Port + classification** (`enrichment.port.ts`): same typed-error semantics as the
+  campaign classifier (subclass-before-base, unknown ⇒ NON_RETRYABLE).
+- **Batch runner** (`api/src/catalog/batch.ts`): per-SKU isolation — one SKU's failure
+  never blocks siblings; retry ladder owned by us (PARSE_FAILED = exactly one
+  re-request); every operational failure lands UNENRICHED + classified error_detail;
+  telemetry counters for llm_calls rows.
+- **Stable-mode ports** (`replay.enrichment.ts`): record/replay keyed by request-body
+  sha256; LOUD cache-miss error, same contract as campaign.
+
+### Tests — shared 59/59 · api 263/263 passing
+
+- SQL-constraint mirrors: ENRICHED-without-model rejected, FAILED-without-reason
+  rejected, UNENRICHED degraded row valid both bare and with reason; strict rejection
+  of a smuggled `list_price_paise` key (the trust rule as a test).
+- Normalizer branch coverage: clean pass-through zero-warning; rogue output degrades
+  partially with every warning named; money token kept + flagged; blank display name
+  hard-rejects; empty-catalog pairings never invented.
+- Prompt tests: hash recompute, closed-vocabulary presence driven from CATALOG_CONFIG
+  (not string-matched prose), fixture-leak prohibition, payload field whitelist (the
+  six marketing keys exactly), sorted allowed_skus stability, key sensitivity to item
+  AND model.
+- Batch matrix: healthy batch counters, rogue-still-enriches, parse-fail→one
+  re-request→success (parse_retries=1), transport exhaustion → UNENRICHED with
+  classified detail, NON_RETRYABLE single-call abort with sibling unaffected,
+  EMPTY_DISPLAY_NAME keeps raw_response for debug, backoff arithmetic with injected
+  jitter (550ms).
+- Replay: record round-trip, byte-equal hit, loud miss with key, corrupt fixture.
+
+### Adversarial fixes caught by testing
+
+1. **Seed data leaked into the frozen prompt**: rule 1 originally taught typo-fixing
+   with "ButterScchop → Butterscotch" — literally PSTRY-BSC's raw name. The freeze-
+   discipline test forbidding fixture strings caught it; example genericized ("correct
+   obvious typos"), and the test now also forbids the corrected form.
+2. **CATALOG_CONFIG imported from the wrong module** in normalize.ts (schema.ts
+   re-exported nothing) — TS2459 at build, fixed to import from config.ts.
+
+### Documented normalizations (registered in ARCHITECTURE.md §18)
+
+Five new register rows: UNENRICHED-vs-FAILED semantics, post-hoc enforcement of the
+closed vocabulary, flag-don't-strip money prose, trust-rule-at-the-source input shape +
+case-insensitive pairing allow-listing, and SQL CHECK constraints mirrored as superRefine.
+
+### Gaps / deferred
+
+- DB writes (status transitions on catalog_enriched) land with Postgres persistence —
+  outcomes are pure values today.
+- The seeded degraded row (one UNENRICHED SKU with error_detail) is written by the
+  M6 seed scripts using this runner.
+- Live Anthropic calls untested against the real API (no key in CI).
+
+---
+
