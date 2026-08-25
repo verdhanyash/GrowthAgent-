@@ -665,11 +665,12 @@ export const PairingPayloadZ = z
   })
   .strict();
 
+// NORMALIZATION (ARCHITECTURE.md §18 row 5): campaign.md's producer enum wins
+// over negotiation.md's sketched PUSH_ITEM/BUILD_BUNDLE/CLEARANCE/CROSS_SELL_TIMING.
 export const CampaignActionZ = z.enum([
-  "PUSH_ITEM",
-  "BUILD_BUNDLE",
-  "CLEARANCE",
-  "CROSS_SELL_TIMING",
+  "PRIORITIZE_IN_BUNDLES",
+  "CLEAR_NEAR_EXPIRY",
+  "PROMOTE_PAIR",
 ]);
 
 export const CampaignPriorityPayloadZ = z
@@ -717,9 +718,12 @@ export const EvidencePackEntryZ = z
   .object({
     id: z.string().regex(/^E\d{3}$/),
     kind: EvidenceKindZ,
+    // NORMALIZATION (ARCHITECTURE.md §18): canonical SKU shape adopted from the
+    // gatekeeper fixtures (`CAKE-CHOC-500`) — NOT negotiation.md's sketched
+    // `^SKU-[A-Z0-9-]{3,24}$`; packs are built from the same catalog rows.
     sku: z
       .string()
-      .regex(/^SKU-[A-Z0-9-]{3,24}$/)
+      .regex(/^[A-Z0-9][A-Z0-9_-]{1,31}$/)
       .nullable(), // null for store-level stats & campaigns
     payload: EvidencePayloadZ,
     source_table: z.string(), // e.g. "products", "inventory+stock_reservations"

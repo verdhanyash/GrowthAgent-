@@ -425,6 +425,14 @@ Parallel deep-design produced seven specs; these normalizations are decided HERE
 | expected/actual fields | §13 matrix pins `expected`/`actual` strings on PASS and BAND rows too; §4 sketch only carried them on FAIL | **Optional `expected`/`actual` added to PASS/BAND/ESCALATE_TRIGGER/UNAVAILABLE_INPUT verdict variants** (M1) |
 | repeatOffender with UNAVAILABLE velocity | §6 leaves SKIP vs UNAVAILABLE_INPUT open; UNAVAILABLE_INPUT would duplicate VELOCITY_UNAVAILABLE's escalation cause | **UNAVAILABLE → SKIP**, decision recorded in the trace entry per I-4 (M1) |
 | NaN defense ordering | §10 NAN-DEFENSE requires fail-closed, but context math could crash before rules ran | **`structurallyValid` guard in buildContext**: invalid carts zero all money math so no rule ever sees hostile numerics; GK-CART-STRUCTURE delivers the FAIL (M1) |
+| Unsupported-discount verdict | Matrix rows A10/A12 pin FAILED for UNSUPPORTED_DISCOUNT_CLAIM, but negotiation.md §4.2 pseudocode + §4.6 mark it recoverable | **STRIPPED** — claim removed, cart intact; the auditor removes narrative lies, the GATEKEEPER owns discount policy (pseudocode + §4.6 majority) (M2) |
+| Gross-fabrication threshold | A2's parenthetical ("500 > 3×214") mis-derives its own rule — the stated gate needs cited facts < value/3, which 214 fails | **Gross gate = value > 3× max same-unit cited fact**, implemented literally; both sides pinned by fixture design (A2 gross→FAILED, A2b sub-3×→STRIPPED) (M2) |
+| Money relevance of a NUMERIC_MISMATCH | Docs never state the rule; A3 (wrong attach %) recovers while A4 (wrong price) is fatal | **`money_relevant := token.unit ∈ {RUPEE, PAISE}` OR `claim.kind ∈ {PRICE, MARGIN}`** — a PCT token alone is narrative, not money (M2) |
+| Claim amputation on mismatch | §8.1 matrix narrates "claim removed; cart intact"; pseudocode ambiguous on which mismatches strip | **EVERY unreconciled number amputates its claim; money relevance escalates only the VERDICT to FAILED, never the amputation** (M2) |
+| Discount-context short-circuit | §4.6 unsupported-discount branch `continue`s past that token's numeric reconciliation | **Gentler code wins**: a fabricated total hidden behind an unsupported-discount token ships STRIPPED, not FAILED — acceptable layering since settlement re-prices the cart deterministically (M2) |
+| Zod major version | §19 left the pin open; schemas drafted v3-classic but SDK `zodOutputFormat` requires zod/v4 internally | **Dual-track**: LLM-facing proposal schema on `zod/v4` (`strictObject`, `/v4` subpath of zod@3.25.76); validation-only schemas stay v3 classic (M2) |
+| Anthropic SDK surface | Deep specs' "verified" facts were checked against SDK 0.57 and are wrong for current releases | **@anthropic-ai/sdk 0.120.0**: typed error classes are client statics usable as VALUES only (`Anthropic.RateLimitError`), `InternalServerError(status, error, message, headers)` ctor, `retry-after` via `headers.get` (M2) |
+| Replay cache addressing | Transport sketches vary on what binds a fixture and where it lives | **ReplayTransport `fixturesDir` IS the negotiations directory itself** (`<dir>/<sha256(canonicalJson({system_prompt_hash, pack_hash, buyer_request_canonical}))>.json`), no extra nesting level (M2) |
 
 ---
 
@@ -435,8 +443,11 @@ Carried from the designers' ledgers — confirm before wiring:
 - [ ] U2: exact Razorpay error code for duplicate receipt
 - [ ] U3: min order amount boundary (`>100` vs `≥100` subunits)
 - [ ] U4: whether `x-razorpay-event-id` is signature-covered (assumed NO → advisory)
-- [ ] Streaming + `output_config.format` on the pinned SDK (feature-detect; pin `parse` mode otherwise)
-- [ ] Zod major version pin (schemas drafted v3-style; v4 moves datetime validators)
+- [x] SDK surface resolved (M2): upgraded to `@anthropic-ai/sdk@0.120.0`; non-streaming
+  `messages.create` with `zodOutputFormat` parse mode (streaming+format combination
+  unnecessary at demo scale; deterministic fallback absorbs parse failures)
+- [x] Zod pin resolved (M2): zod@3.25.76 — v3 classic for validation-only schemas,
+  `zod/v4` subpath for the LLM-facing output format (see §18 register)
 
 ---
 

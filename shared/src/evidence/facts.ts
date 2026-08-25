@@ -47,6 +47,10 @@ export function deriveNumericFacts(entry: EvidencePayload): NumericFact[] {
         { name: "list_price_paise", unit: "PAISE", value: p.list_price_paise },
         { name: "list_price_rupees", unit: "RUPEE", value: p.list_price_paise / 100 },
         { name: "cost_paise", unit: "PAISE", value: p.cost_paise },
+        // RUPEE mirror of cost (same pattern as list/revenue) — without it a
+        // true "cost is ₹342" claim can never reconcile and redaction (A16)
+        // would have no observable contrast.
+        { name: "cost_rupees", unit: "RUPEE", value: p.cost_paise / 100 },
       ];
     }
     case "STOCK": {

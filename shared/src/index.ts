@@ -30,6 +30,49 @@ export {
   type NumericFact,
 } from "./evidence/facts.js";
 
+/* deterministic evidence-ID allocation + pack hashing (negotiation.md §1.4) */
+export {
+  allocateIds,
+  KIND_ORDER,
+  packHash,
+  PackInvariantViolationError,
+  type EvidencePackEntryInput,
+} from "./evidence/ids.js";
+
+/* negotiation stage contracts (negotiation.md §3.3/§4) */
+export {
+  NegotiationProposalZ,
+  ProposedItemZ,
+  ClaimZ,
+  ClaimKindZ,
+  EvidenceIdZ,
+  type NegotiationProposal,
+  type ProposedItem,
+  type Claim,
+  type ClaimKind,
+} from "./negotiation/proposal.schema.js";
+export {
+  auditCitations,
+  DEFAULT_TOLERANCES,
+  extractNumbers,
+  isDiscountContext,
+  type AuditOptions,
+  type CitationAuditResult,
+  type CitationVerdict,
+  type CitationViolation,
+  type Tolerances,
+  type ViolationCode,
+  type NumberToken,
+} from "./negotiation/audit.js";
+export type {
+  BuyerRequestItem,
+  BuyerRequestView,
+  NoteHeuristicTags,
+  NegotiationStageInput,
+  ProvenanceEnvelope,
+  ProvenancedProposal,
+} from "./negotiation/context.types.js";
+
 /* SSE audit-event envelope + taxonomy (frontend-events.md §1) */
 export {
   TxId,
