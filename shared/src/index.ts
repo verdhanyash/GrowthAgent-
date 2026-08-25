@@ -73,6 +73,33 @@ export type {
   ProvenancedProposal,
 } from "./negotiation/context.types.js";
 
+/* campaign-orchestrator contracts (campaign.md §4/§6/§7.1/§12.4) */
+export { CAMPAIGN_CONFIG } from "./campaign/config.js";
+export {
+  LlmInvocationSchema,
+  MetricSchema,
+  OpportunitySchema,
+  OpportunityType,
+  PriorityAction,
+  PriorityEntrySchema,
+  PrioritySetSchema,
+  PrioritySetStatus,
+  RationaleItemZ,
+  RationalesOutputZ,
+  type LlmInvocation,
+  type Metric,
+  type Opportunity,
+  type PriorityEntry,
+  type PrioritySet,
+  type RationaleItem,
+  type RationalesOutput,
+} from "./campaign/schema.js";
+export type {
+  CampaignAuditEvent,
+  RationaleFallbackVerdict,
+  SuppressionReason,
+} from "./campaign/audit-events.js";
+
 /* SSE audit-event envelope + taxonomy (frontend-events.md §1) */
 export {
   TxId,

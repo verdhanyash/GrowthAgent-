@@ -173,3 +173,123 @@ auditor strips narrative lies; policy stays with the gatekeeper.
 
 ---
 
+## M3 — Campaign orchestrator (LLM #2 of 4) — 2026-08-26
+
+**The merchandising brain**: analytics opportunities → deterministic priority set →
+per-entry rationales that cannot lie, per `docs/design/campaign.md`. This slice is the
+pure domain + LLM seam; the analytics SQL layer and the scheduler cycle land with
+persistence (M4) by plan — opportunities arrive hand-built from the doc's worked
+examples today.
+
+### Built
+
+- **Schemas** (`shared/src/campaign/schema.ts`): dual-track zod — validation-only v3
+  (`Opportunity` id regex `^opp_[a-z_]+_[0-9a-f]{10}$`, ≥2 metrics; `PriorityEntry`
+  rationale min 20; `PrioritySet` content-bound `ps_v<version>_<8hex>` id, nullable
+  `llm_invocation`; `LlmInvocation` counters incl. `from_cache`) plus the LLM-facing
+  `RationalesOutputZ` on zod/v4 strictObject — `{rationales: [{entry_index: int ≥0,
+  rationale_nl: 40..600}]}` is the model's ENTIRE output surface; it structurally
+  cannot mutate actions/SKUs/weights. `CampaignAuditEvent` union (7 event types) also
+  in shared.
+- **Metric formatters + exact-set table** (`api/src/campaign/analytics/format.ts`):
+  en-IN paise grouping, `units/day` rate formatter, weekday labels, and `METRIC_SETS` —
+  each OpportunityType carries EXACTLY the metric keys its template quotes.
+- **Pure derivation core** (`api/src/campaign/domain/derive.ts`): content-derived ids
+  (`opp_<type>_<sha256[:10]>` over runId|type|sorted skus — reorder-invariant,
+  idempotent republication), fixed ACTION_MAP, monotone clamped weight functions
+  (§6.5 worked examples pinned: UNDER .44 / EXPIRY .71 / ATTACH .58 / TIMING .77),
+  total-order assembly (weight desc → type tiebreak → id asc) with audited suppressions
+  (SET_FULL at 8, SKU_ALREADY_CLAIMED), one-rounding weight emission, `buildPrioritySet`
+  with `set_id = ps_v<n>_<md5(canonicalJson(set-without-id))[:8]>` and TTL-bounded
+  `valid_until_sim`.
+- **Prompt layer** (`api/src/campaign/llm/prompts.ts`): frozen system prompt (sha256
+  pinned; quoting contract + index-addressed role; zero run data — freeze test proves
+  the only datelike byte sequence is rule 4's sanctioned exemplar), user payload of
+  `{entry_index, action, skus, weight, metrics}` lines carrying NO ids the model could
+  echo wrongly, deterministic request body + sha256 replay-key over canonical JSON.
+- **Live port** (`llm/live-claude.rationale.ts`): claude-opus-5 via `messages.parse` +
+  `output_config: {format: zodOutputFormat(RationalesOutputZ)}`, adaptive thinking,
+  ephemeral-cached system block, client `maxRetries: 0` — the ladder below is ours and
+  test-visible.
+- **Failure classification** (`llm/rationale.port.ts`): typed SDK errors → RETRYABLE /
+  NON_RETRYABLE / PARSE_FAILED / CHAOS_FORCED (connection-timeout folded into
+  connection-error before the base-class check).
+- **Rationale runner** (`llm/rationale-runner.ts`): retry ladder (attempts=2, backoff
+  500ms·2^n+jitter with injectable sleep/jitter for determinism), index-addressed
+  attachment (first-wins on duplicates → NO_INDEX events with rejected text; missing
+  indices → templated entry + NO_INDEX; out-of-range silently ignored), §10 outcome
+  reconciliation — verified→FRESH, any verifier failure templates just that entry
+  (PARTIAL_TEMPLATE), port-level failure keeps previous set EXCEPT seed time publishes
+  an all-template set so demo beat 1 always has material — plus `LlmInvocation`
+  telemetry on every publish.
+- **Verifier** (`verify/rationale-verifier.ts`): Rule 1 completeness (every metric
+  display present after normalization) before Rule 2 no-invention (every numeric token
+  ∈ displays ∪ raw values ∪ entry weight). Normalizer strips SKU-like identifiers
+  pre-lowercase (so KAJU_KATLI_250G contributes no phantom "250"), handles ₹ Indian
+  grouping, unicode minus, subscripts, unit suffixes.
+- **Templates** (`verify/template-rationales.ts`): per-type rationale quoting exactly
+  METRIC_SETS — self-verifying by construction (U-9).
+- **Stable-mode ports** (`llm/replay.rationale.ts`): record/replay keyed by request-body
+  sha256; cache miss throws LOUD `StableModeCacheMissError` — never a silent live call.
+
+### Tests — shared 51/51 · api 240/240 passing
+
+- Worked-example weight goldens; monotonicity sweeps per type; clamp extremes (lift
+  100 ⇒ exactly 1; dte 0 ⇒ max urgency); golden id vector + sku-reorder invariance;
+  assembly ordering/conflict tiebreak/SET_FULL cap/shuffled-input determinism; set_id
+  stability + sensitivity + regex.
+- Verifier matrix U-4..U-9: honest rationales verify ∀4 types; percent-conversion
+  ("46%" for "0.46x") rejected; EMPLOYEE50-style injection trips the digit scanner;
+  dropped display ⇒ MISSING_METRIC; restating raw values tolerated; normalizer probes;
+  all four templates self-verify.
+- Prompt tests: hash stability + recompute, freeze discipline, payload id-freeness,
+  byte-equality (U-14), body determinism, key sensitivity to payload AND model edits.
+- Failure classification 9-row table with REAL SDK error instances (mirrors negotiation's
+  suite); ladder call/sleep-count assertions incl. PARSE_FAILED single re-request and
+  CHAOS break.
+- §10 outcome matrix ×4 failure kinds × {previous exists ⇒ KEEP_PREVIOUS, seed ⇒
+  TEMPLATE_ONLY}; poisoned-rationale containment (rejected text kept verbatim in the
+  fallback event; templated replacement still self-verifies); index edges (missing/
+  duplicate/out-of-range/null).
+- Replay: record round-trip, hit byte-equality, loud miss, corrupt fixture, schema
+  rejection of structurally-wrong fixtures, key sensitivity forcing exactly-one re-record.
+- shared `campaign-schema.spec`: bounds + strictness on both zod tracks (39-char
+  rationale rejected, negative index rejected, unknown keys rejected everywhere).
+
+### Adversarial fixes caught by testing
+
+1. **Positional DraftArgs mis-zip**: spec helpers built payloads by zipping assembly
+   output against ALL_OPPS positionally — wrong the moment assembly reorders or
+   suppresses. Caught as `entry_index: 0` carrying EGGLESS_LOAF with UNDERSELLING's
+   metrics; replaced with a lookup-aligned `DRAFT_ARGS` fixture helper (the M3 cycle
+   must construct args the same way).
+2. **Fixture SKU collision**: the expiry example sat on KAJU_KATLI_250G, which AT-1's
+   pair also claims — campaign.md's dataset uses E for both, but only ever as separate
+   per-query SQL fixtures, never one assembled set. Our combined fixture suppressed
+   ATTACH at assembly (weight .58 < .71) and broke eleven downstream expectations.
+   Expiry moved to F=DRY_CAKE_ASSORTED; conflict semantics remain covered by dedicated
+   synthetic U-11 tests.
+3. **Inverted monotonicity sweep**: the U-1 probe walked velocity ratio ASCENDING while
+   asserting non-decreasing weight — but lower underselling means LOWER weight. Sweep
+   now walks descending, matching the property it names.
+
+### Documented normalizations (registered in ARCHITECTURE.md §18)
+
+Eight new register rows: string-valued context metrics, the EXACT-SET RULE (and
+UNDERSELLING gaining stock_units), SKU-like identifier stripping in the verifier,
+retry-ladder ownership, seed-time TEMPLATE_ONLY fallback, the TS↔PG set_id digest
+coincidence, TIMING reusing PRIORITIZE_IN_BUNDLES, and the §15-A fixture de-conflict
+adjudication.
+
+### Gaps / deferred
+
+- Analytics SQL layer (§5 queries, fingerprint/run_id emission) lands with Postgres
+  persistence (M4) — opportunity fixtures are hand-built until then.
+- `runCampaignCycle` composition (lock acquisition, DB reads/writes, audit sink wiring)
+  deferred to M4 by plan; ports tested via stubs.
+- Live Anthropic calls untested against the real API (no key in CI);
+  DEMO_STABLE_MODE replay covers demo runs.
+- Remaining two LLM agents: catalog-intelligence, explainer.
+
+---
+
