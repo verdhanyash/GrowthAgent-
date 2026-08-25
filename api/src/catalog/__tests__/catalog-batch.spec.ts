@@ -3,8 +3,8 @@
  * PARSE_FAILED re-request), and the degradation contract: every operational
  * failure lands UNENRICHED with error_detail while siblings sail through.
  */
-import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
+import { NimHttpError, NimNetworkError } from "../../llm/nim.js";
 import type { EnrichmentOutput } from "@growthagent/shared";
 import { enrichCatalog } from "../batch.js";
 import type { CatalogItemInput } from "../prompts.js";
@@ -54,7 +54,7 @@ describe("enrichCatalog", () => {
     });
     const tin = r.results[0]!;
     expect(tin.status).toBe("ENRICHED");
-    expect(tin.updated_by_model).toBe("claude-opus-5");
+    expect(tin.updated_by_model).toBe("meta/llama-3.3-70b-instruct");
     expect(tin.fields?.occasions).toEqual(["diwali", "congrats"]);
     expect(tin.raw_response).toEqual(OUT_TIN);
     expect(tin.error_detail).toBeNull();
@@ -88,7 +88,7 @@ describe("enrichCatalog", () => {
 
   it("transport failure → UNENRICHED with classified error_detail; raw fields kept", async () => {
     const h = scripted(async () => {
-      throw new Anthropic.APIConnectionError({ message: "conn dead" });
+      throw new NimNetworkError("conn dead");
     });
     const r = await enrichCatalog(h.port, [ITEM_TIN], { allowedSkus: ALL_SKUS }, NO_SLEEP);
     expect(h.calls()).toBe(2); // ladder exhausted
@@ -108,7 +108,7 @@ describe("enrichCatalog", () => {
       enrich: async ({ item }: { item: CatalogItemInput }) => {
         if (item.sku === ITEM_TIN.sku) {
           tinCalls++;
-          throw new Anthropic.BadRequestError(400, { message: "bad" }, "b", new Headers());
+          throw new NimHttpError(400, "bad");
         }
         bscCalls++;
         return OUT_BSC;
@@ -144,7 +144,7 @@ describe("enrichCatalog", () => {
     const sleeps: number[] = [];
     const t = { sleep: async (ms: number) => void sleeps.push(ms), jitter: () => 0.5 };
     const h = scripted(async () => {
-      throw new Anthropic.InternalServerError(500, { message: "down" }, "d", new Headers());
+      throw new NimHttpError(500, "down");
     });
     await enrichCatalog(h.port, [ITEM_TIN], { allowedSkus: ALL_SKUS }, t);
     // 500·2^0 + floor(0.5·100) = 550

@@ -38,12 +38,12 @@ export const CAMPAIGN_CONFIG = {
   lockTtlMs: 5 * 60_000,
 
   // -- LLM
-  rationaleModel: "claude-opus-5" as const,
+  rationaleModel: "meta/llama-3.3-70b-instruct" as const,
   rationaleMaxTokens: 4096,
   rationaleTimeoutMs: 30_000,
 
-  // -- rationale retry ladder (§7.3): the SDK client runs maxRetries: 0 so this
-  // ladder is ours and test-visible. Sleep/jitter are injectable for tests.
+  // -- rationale retry ladder (§7.3): nimChat never retries so this ladder is
+  // ours and test-visible. Sleep/jitter are injectable for tests.
   rationaleAttempts: 2,
   rationaleBackoffBaseMs: 500,
 } as const;

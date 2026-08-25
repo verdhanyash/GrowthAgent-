@@ -15,7 +15,7 @@ const ROW = {
   merchant_id: MERCHANT,
   sku: "COOKIE-TIN-AST",
   enrichment_status: "ENRICHED",
-  updated_by_model: "claude-opus-5",
+  updated_by_model: "meta/llama-3.3-70b-instruct",
   display_name: "Assorted Cookies Tin",
   description: "A tin of cookies.",
   category: "Cookies",

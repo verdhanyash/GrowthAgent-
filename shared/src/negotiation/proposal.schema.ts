@@ -3,10 +3,11 @@
  * (negotiation.md §3.3, verbatim). strict-object maps to additionalProperties:false:
  * a cheeky `admin_approved: true` becomes a schema failure instead of a silent pass.
  *
- * Built on `zod/v4`, NOT v3-classic: @anthropic-ai/sdk's `zodOutputFormat`
- * helper imports `zod/v4` and calls `z.toJSONSchema` on what it receives, so a
- * v3 schema would neither typecheck nor run. LLM-facing schemas live here;
- * validation-only schemas elsewhere stay on v3 classic (§18 register).
+ * Built on `zod/v4`, NOT v3-classic: the LLM seam compiles this schema with
+ * zod/v4's own `toJSONSchema` (feeding NIM's nvext.guided_json) and re-
+ * validates replies against it, so a v3 schema would be the odd one out.
+ * LLM-facing schemas live here; validation-only schemas elsewhere stay on v3
+ * classic (§18 register).
  */
 import { z } from "zod/v4";
 

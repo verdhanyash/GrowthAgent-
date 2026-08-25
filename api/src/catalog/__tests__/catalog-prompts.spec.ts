@@ -80,18 +80,18 @@ describe("buildUserPayload", () => {
 
 describe("request body + replay key", () => {
   it("body deterministic; key its sha256 over canonical JSON", () => {
-    const b1 = buildRequestBody(ARGS, "claude-opus-5");
-    const b2 = buildRequestBody(ARGS, "claude-opus-5");
+    const b1 = buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct");
+    const b2 = buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct");
     expect(JSON.stringify(b1)).toBe(JSON.stringify(b2));
     expect(requestBodyKey(b1)).toMatch(/^[0-9a-f]{64}$/);
     expect(requestBodyKey(b1)).toBe(requestBodyKey(b2));
   });
 
   it("key sensitive to item AND model changes", () => {
-    const base = requestBodyKey(buildRequestBody(ARGS, "claude-opus-5"));
+    const base = requestBodyKey(buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct"));
     expect(
-      requestBodyKey(buildRequestBody({ item: ITEM_MITHAI, allowedSkus: ALL_SKUS }, "claude-opus-5")),
+      requestBodyKey(buildRequestBody({ item: ITEM_MITHAI, allowedSkus: ALL_SKUS }, "meta/llama-3.3-70b-instruct")),
     ).not.toBe(base);
-    expect(requestBodyKey(buildRequestBody(ARGS, "claude-opus-4"))).not.toBe(base);
+    expect(requestBodyKey(buildRequestBody(ARGS, "meta/llama-3.1-8b-instruct"))).not.toBe(base);
   });
 });

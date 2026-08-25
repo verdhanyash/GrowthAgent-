@@ -2,11 +2,11 @@
  * Negotiation prompt assembly — PURE (negotiation.md §2).
  *
  * - NEGOTIATION_SYSTEM_PROMPT_V3 is FROZEN: nothing dynamic is ever
- *   interpolated into it (cache breakpoint B1 stays honest); its sha256 is
- *   written into every audit event.
+ *   interpolated into it (the system message sent to NIM is stable); its
+ *   sha256 is written into every audit event.
  * - renderNegotiationMessages is pure: same inputs → same bytes. That is what
- *   makes golden-file tests, B2 cache hits on retries, and DEMO_STABLE_MODE
- *   keys possible.
+ *   makes golden-file tests, byte-identical retry requests, and
+ *   DEMO_STABLE_MODE keys possible.
  */
 import { createHash } from "node:crypto";
 import type {
@@ -136,7 +136,9 @@ export interface RenderedMessage {
 }
 
 export interface RenderedRequest {
-  /** System blocks carrying cache breakpoint B1 (§2.5). */
+  /** System blocks as frozen text. The Anthropic-era cache_control marker is
+   *  kept as inert render-shape metadata only — the NIM transport joins block
+   *  texts into ONE system message and markers never go on the wire. */
   readonly system_blocks: readonly {
     readonly type: "text";
     readonly text: string;
@@ -144,18 +146,21 @@ export interface RenderedRequest {
   }[];
   readonly messages: readonly RenderedMessage[];
   readonly params: {
-    readonly model: "claude-opus-5";
+    readonly model: "meta/llama-3.3-70b-instruct";
     readonly max_tokens: number;
-    readonly thinking: { readonly type: "adaptive"; readonly display: "summarized" };
-    /** NOTE: temperature/top_p/top_k REMOVED on opus-5 (400 if sent) — absent by construction. */
+    /** NOTE: temperature/top_p/top_k stay REMOVED (NIM parity with the
+     *  opus-5 stance) — absent by construction; `thinking` is gone with the
+     *  Anthropic SDK. */
   };
 }
 
 /**
- * §2.2 layout, verbatim structure. Block order = stability order: the cached
- * prefix ends with the pack (breakpoint B2), the volatile tail carries the
- * buyer content, and the tagger advisory rides as a mid-conversation system
- * message AFTER the cached prefix so it cannot disturb it.
+ * §2.2 layout, verbatim structure. Block order = stability order: the cached-
+ * prefix block ends with the pack (Anthropic-era breakpoint B2 — markers no
+ * longer travel, but the layout order is preserved), the volatile tail
+ * carries the buyer content, and the tagger advisory rides as a
+ * mid-conversation system message AFTER the cached prefix so it cannot
+ * disturb it.
  */
 export function renderNegotiationMessages(input: NegotiationStageInput): RenderedRequest {
   const { pack } = input;
@@ -236,9 +241,8 @@ export function renderNegotiationMessages(input: NegotiationStageInput): Rendere
       },
     ],
     params: {
-      model: "claude-opus-5",
+      model: "meta/llama-3.3-70b-instruct",
       max_tokens: 8000,
-      thinking: { type: "adaptive", display: "summarized" },
     },
   };
 }

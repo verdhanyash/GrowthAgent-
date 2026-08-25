@@ -22,7 +22,7 @@ export const CATALOG_CONFIG = {
   maxWarnings: 8,
 
   // -- LLM
-  enrichmentModel: "claude-opus-5" as const,
+  enrichmentModel: "meta/llama-3.3-70b-instruct" as const,
   enrichmentMaxTokens: 2048,
   enrichmentTimeoutMs: 30_000,
 

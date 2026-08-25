@@ -169,11 +169,19 @@ describe("row 48 · LATENCY-BUDGET", () => {
         total_paise: gross - mulDivRoundHalfUp(gross, toBps(14), 10_000),
       },
     });
-    const t0 = process.hrtime.bigint();
-    const r = evaluate(proposal, { gt });
-    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-    expect(r.trace).toHaveLength(16);
-    expect(ms).toBeLessThan(5);
+    // Warm-up + min-of-N: a single cold measurement measures JIT and
+    // scheduler noise, not the engine. Min is the standard micro-latency
+    // estimator — the budget exists to catch algorithmic blowups.
+    for (let i = 0; i < 3; i++) evaluate(proposal, { gt });
+    let bestMs = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 10; i++) {
+      const t0 = process.hrtime.bigint();
+      const run = evaluate(proposal, { gt });
+      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      if (ms < bestMs) bestMs = ms;
+      expect(run.trace).toHaveLength(16);
+    }
+    expect(bestMs).toBeLessThan(5);
   });
 });
 

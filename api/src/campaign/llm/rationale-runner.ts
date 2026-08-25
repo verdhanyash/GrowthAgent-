@@ -2,8 +2,8 @@
  * Rationale acquisition + application policy (campaign.md §7.3, §8.1, §10).
  *
  * Two layers:
- *  1. draftRationalesWithFallback — OWNS the retry ladder (SDK client runs
- *     maxRetries: 0 so this is ours and test-visible): up to
+ *  1. draftRationalesWithFallback — OWNS the retry ladder (nimChat never
+ *     retries so this is ours and test-visible): up to
  *     CAMPAIGN_CONFIG.rationaleAttempts invocations for RETRYABLE errors,
  *     exactly one re-request for PARSE_FAILED, immediate abort for
  *     NON_RETRYABLE. Backoff 500ms·2^n + jitter, both injectable for tests.

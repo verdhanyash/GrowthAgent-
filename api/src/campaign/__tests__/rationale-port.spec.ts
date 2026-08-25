@@ -1,11 +1,11 @@
 /**
- * Failure classification (campaign.md §7.3, U-13) against REAL SDK error
+ * Failure classification (campaign.md §7.3, U-13) against REAL seam error
  * instances — never string-matching — plus the retry ladder's observable
  * behavior with injected timing (no real sleeps).
  */
-import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import type { RationalesOutput } from "@growthagent/shared";
+import { NimHttpError, NimNetworkError } from "../../llm/nim.js";
 import {
   ChaosForcedTimeoutError,
   RationaleParseError,
@@ -16,17 +16,18 @@ import { backoffDelay, draftRationales } from "../llm/rationale-runner.js";
 import { ALL_OPPS } from "./campaign-fixtures.js";
 import { assembleEntries } from "../domain/derive.js";
 
-const headers = new Headers();
-
 describe("U-13 classification table", () => {
   const cases: [string, () => unknown, string][] = [
-    ["RateLimitError(429)", () => new Anthropic.RateLimitError(429, { message: "rl" }, "rl", headers), "RETRYABLE_EXHAUSTED"],
-    ["InternalServerError(500)", () => new Anthropic.InternalServerError(500, { message: "ise" }, "ise", headers), "RETRYABLE_EXHAUSTED"],
-    ["APIConnectionError", () => new Anthropic.APIConnectionError({ message: "conn" }), "RETRYABLE_EXHAUSTED"],
-    ["APIConnectionTimeoutError ⊂ connection", () => new Anthropic.APIConnectionTimeoutError(), "RETRYABLE_EXHAUSTED"],
-    ["BadRequestError(400) is our bug", () => new Anthropic.BadRequestError(400, { message: "bad" }, "bad", headers), "NON_RETRYABLE"],
-    ["AuthenticationError(401)", () => new Anthropic.AuthenticationError(401, { message: "auth" }, "auth", headers), "NON_RETRYABLE"],
-    ["base APIError → retryable (subclass order honored)", () => new Anthropic.APIError(418, { message: "teapot" }, "teapot", headers), "RETRYABLE_EXHAUSTED"],
+    ["NimHttpError(429) rate limit", () => new NimHttpError(429, "rl"), "RETRYABLE_EXHAUSTED"],
+    ["NimHttpError(500) server error", () => new NimHttpError(500, "ise"), "RETRYABLE_EXHAUSTED"],
+    ["NimHttpError(502) gateway ⊂ server family", () => new NimHttpError(502, "bad gateway"), "RETRYABLE_EXHAUSTED"],
+    ["NimNetworkError connection", () => new NimNetworkError("conn"), "RETRYABLE_EXHAUSTED"],
+    ["timeout abort rides the network class (NimNetworkError)", () => new NimNetworkError("NIM request failed: This operation was aborted"), "RETRYABLE_EXHAUSTED"],
+    ["NimHttpError(400) is our bug", () => new NimHttpError(400, "bad"), "NON_RETRYABLE"],
+    ["NimHttpError(401) bad key", () => new NimHttpError(401, "auth"), "NON_RETRYABLE"],
+    ["NimHttpError(404) unsupported model field", () => new NimHttpError(404, "model not found"), "NON_RETRYABLE"],
+    ["NimHttpError(422) unprocessable", () => new NimHttpError(422, "unprocessable"), "NON_RETRYABLE"],
+    ["NimHttpError(418) unrecognized status ⇒ defect, not weather", () => new NimHttpError(418, "teapot"), "NON_RETRYABLE"],
     ["RationaleParseError", () => new RationaleParseError(), "PARSE_FAILED"],
     ["ChaosForcedTimeoutError", () => new ChaosForcedTimeoutError(), "CHAOS_FORCED"],
     ["plain Error defaults to NON_RETRYABLE (defect, not weather)", () => new Error("boom"), "NON_RETRYABLE"],
@@ -67,7 +68,7 @@ describe("draftRationales ladder", () => {
     const sleeps: number[] = [];
     const t = { sleep: async (ms: number) => void sleeps.push(ms), jitter: () => 0 };
     const { port } = countingPort(async () => {
-      throw new Anthropic.InternalServerError(500, { message: "down" }, "d", headers);
+      throw new NimHttpError(500, "down");
     });
     const r = await draftRationales(port, ARGS, t);
     expect(r.ok).toBe(false);
@@ -77,7 +78,7 @@ describe("draftRationales ladder", () => {
 
   it("success on the second attempt wins after one retryable blip", async () => {
     const { port } = countingPort(async (n) => {
-      if (n === 1) throw new Anthropic.RateLimitError(429, { message: "rl" }, "r", headers);
+      if (n === 1) throw new NimHttpError(429, "rl");
       return { rationales: [{ entry_index: 0, rationale_nl: "x".repeat(50) }] };
     });
     const r = await draftRationales(port, ARGS, NO_SLEEP);
@@ -88,7 +89,7 @@ describe("draftRationales ladder", () => {
     const sleeps: number[] = [];
     const t = { sleep: async (ms: number) => void sleeps.push(ms), jitter: () => 0 };
     const h = countingPort(async () => {
-      throw new Anthropic.BadRequestError(400, { message: "bad request shape" }, "b", headers);
+      throw new NimHttpError(400, "bad request shape");
     });
     const r = await draftRationales(h.port, ARGS, t);
     expect(r.ok).toBe(false);

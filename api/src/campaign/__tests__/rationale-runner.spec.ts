@@ -3,9 +3,9 @@
  * reconciliation — plus index-addressed attachment (§7.1, §14: duplicates,
  * missing/out-of-range indices). All pure; ports are stubs.
  */
-import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import type { RationalesOutput } from "@growthagent/shared";
+import { NimHttpError, NimNetworkError } from "../../llm/nim.js";
 import { assembleEntries } from "../domain/derive.js";
 import {
   applyRationales,
@@ -53,7 +53,7 @@ describe("healthy LLM — statuses", () => {
     expect(r.applied.entries_verified).toBe(4);
     expect(r.applied.fallbacks).toEqual([]);
     expect(r.llm_invocation).toMatchObject({
-      model: "claude-opus-5",
+      model: "meta/llama-3.3-70b-instruct",
       request_hash: "deadbeef",
       latency_ms: 42,
       entries_verified: 4,
@@ -126,9 +126,9 @@ describe("healthy LLM — statuses", () => {
 
 describe("port-level failures — keep previous vs seed-time template", () => {
   const failureCases: [string, unknown][] = [
-    ["rate-limited", new Anthropic.RateLimitError(429, { message: "rl" }, "rl", new Headers())],
-    ["connection dead", new Anthropic.APIConnectionError({ message: "conn" })],
-    ["bad request (our bug)", new Anthropic.BadRequestError(400, { message: "b" }, "b", new Headers())],
+    ["rate-limited", new NimHttpError(429, "rl")],
+    ["connection dead", new NimNetworkError("conn")],
+    ["bad request (our bug)", new NimHttpError(400, "b")],
     ["chaos toggle", new RationaleParseError()],
   ];
   for (const [name, err] of failureCases) {
@@ -247,7 +247,7 @@ describe("draftRationalesWithFallback end-to-end (async seam)", () => {
   it("exhausted retries with no prior set → TEMPLATE_ONLY", async () => {
     const port = {
       draft: async () => {
-        throw new Anthropic.APIConnectionError({ message: "down" });
+        throw new NimNetworkError("down");
       },
     };
     const r = await draftRationalesWithFallback(

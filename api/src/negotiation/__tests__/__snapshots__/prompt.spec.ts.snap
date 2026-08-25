@@ -228,11 +228,7 @@ Remind yourself of rules R1–R10, then respond with the JSON object only.",
   ],
   "params": {
     "max_tokens": 8000,
-    "model": "claude-opus-5",
-    "thinking": {
-      "display": "summarized",
-      "type": "adaptive",
-    },
+    "model": "meta/llama-3.3-70b-instruct",
   },
   "system_blocks": [
     {
@@ -510,11 +506,7 @@ Remind yourself of rules R1–R10, then respond with the JSON object only.",
   ],
   "params": {
     "max_tokens": 8000,
-    "model": "claude-opus-5",
-    "thinking": {
-      "display": "summarized",
-      "type": "adaptive",
-    },
+    "model": "meta/llama-3.3-70b-instruct",
   },
   "system_blocks": [
     {

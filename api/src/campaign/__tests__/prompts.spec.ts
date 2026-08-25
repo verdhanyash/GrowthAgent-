@@ -67,15 +67,15 @@ describe("buildUserPayload (U-14)", () => {
 
 describe("request body + replay key", () => {
   it("body is deterministic; key is its sha256 over canonical JSON", () => {
-    const body1 = buildRequestBody(ARGS, "claude-opus-5");
-    const body2 = buildRequestBody(ARGS, "claude-opus-5");
+    const body1 = buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct");
+    const body2 = buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct");
     expect(JSON.stringify(body1)).toBe(JSON.stringify(body2));
     expect(requestBodyKey(body1)).toMatch(/^[0-9a-f]{64}$/);
     expect(requestBodyKey(body1)).toBe(requestBodyKey(body2));
   });
 
   it("key is sensitive to payload and model changes", () => {
-    const body = buildRequestBody(ARGS, "claude-opus-5");
+    const body = buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct");
     const base = requestBodyKey(body);
     // Spread keeps the literal body shape (a JSON.parse cast would widen it).
     const edited = {
@@ -84,7 +84,7 @@ describe("request body + replay key", () => {
     };
     expect(requestBodyKey(edited)).not.toBe(base);
     expect(
-      requestBodyKey(buildRequestBody(ARGS, "claude-opus-4")),
+      requestBodyKey(buildRequestBody(ARGS, "meta/llama-3.1-8b-instruct")),
     ).not.toBe(base);
   });
 });

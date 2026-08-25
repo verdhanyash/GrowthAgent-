@@ -28,7 +28,7 @@ afterEach(async () => {
 
 const OK_PORT = { enrich: async () => OUT_TIN };
 const keyOf = (args: typeof ARGS): string =>
-  requestBodyKey(buildRequestBody(args, "claude-opus-5"));
+  requestBodyKey(buildRequestBody(args, "meta/llama-3.3-70b-instruct"));
 
 describe("enrichment stable-mode ports", () => {
   it("recording persists under <dir>/<key>.json and passes through", async () => {

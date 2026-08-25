@@ -45,12 +45,11 @@ describe("renderNegotiationMessages", () => {
     expect(prefix.content[0]?.text).toContain("none published");
   });
 
-  it("params carry NO sampling knobs on opus-5 and pin model/max_tokens", () => {
+  it("params pin model/max_tokens and carry NO sampling knobs or thinking", () => {
     const p = renderNegotiationMessages(input()).params;
-    expect(p.model).toBe("claude-opus-5");
+    expect(p.model).toBe("meta/llama-3.3-70b-instruct");
     expect(p.max_tokens).toBe(8000);
-    expect(p.thinking).toEqual({ type: "adaptive", display: "summarized" });
-    expect(Object.keys(p).sort()).toEqual(["max_tokens", "model", "thinking"]);
+    expect(Object.keys(p).sort()).toEqual(["max_tokens", "model"]);
   });
 
   it("places breakpoint B1 on the system block and B2 ending the cached prefix", () => {

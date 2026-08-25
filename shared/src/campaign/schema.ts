@@ -3,10 +3,10 @@
  * output schema (§7.1).
  *
  * DUAL-TRACK ZOD (ARCHITECTURE.md §18, M2): validation-only schemas stay on
- * zod v3 classic; anything handed to `zodOutputFormat` MUST be zod/v4 — the
- * Anthropic SDK helper imports zod/v4 and serializes via its `toJSONSchema`,
- * which rejects v3-classic schema objects at runtime. Here that is exactly
- * one schema: RationalesOutputZ.
+ * zod v3 classic; anything compiled to a wire-level JSON Schema MUST be
+ * zod/v4 — the LLM adapters call zod/v4's `toJSONSchema` (feeding NIM's
+ * nvext.guided_json), which rejects v3-classic schema objects at runtime.
+ * Here that is exactly one schema: RationalesOutputZ.
  */
 import { z } from "zod";
 import { z as z4 } from "zod/v4";

@@ -116,6 +116,26 @@ export {
   type EnrichmentWarning,
 } from "./catalog/normalize.js";
 
+/* explainer-agent contracts (frontend-events.md §4.4.6 narration constraint) */
+export {
+  ExplanationNarrativeSchema,
+  GroundableEventType,
+  NarrativeOutputZ,
+  NarratorAudience,
+  TimelineEventSchema,
+  type ExplanationNarrative,
+  type NarrativeOutput,
+  type TimelineEvent,
+} from "./explainer/schema.js";
+export {
+  BUYER_CLAIM_PREFIX,
+  MIN_UNTRUSTED_LEN,
+  verifyNarration,
+  type NarrationRejection,
+  type NarrationVerifyResult,
+  type VerifyContext,
+} from "./explainer/verify.js";
+
 /* SSE audit-event envelope + taxonomy (frontend-events.md §1) */
 export {
   TxId,

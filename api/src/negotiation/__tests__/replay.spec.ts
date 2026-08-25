@@ -39,7 +39,7 @@ const keyInputs = (): TransportKeyInputs => ({
 const fakeRendered = (): RenderedRequest => ({
   system_blocks: [],
   messages: [],
-  params: { model: "claude-opus-5", max_tokens: 8000, thinking: { type: "adaptive", display: "summarized" } },
+  params: { model: "meta/llama-3.3-70b-instruct", max_tokens: 8000 },
 });
 
 function writeFixture(key: string, body: unknown): void {

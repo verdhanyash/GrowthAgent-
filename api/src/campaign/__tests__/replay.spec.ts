@@ -45,7 +45,7 @@ describe("recording port", () => {
     const recorded = await new RecordingRationalePort(OK_PORT, dir).draft(ARGS);
     expect(recorded).toEqual(OUT);
 
-    const key = requestBodyKey(buildRequestBody(ARGS, "claude-opus-5"));
+    const key = requestBodyKey(buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct"));
     const onDisk = JSON.parse(
       await readFile(`${dir}/${key}.json`, "utf8"),
     ) as unknown;
@@ -68,7 +68,7 @@ describe("replay port", () => {
       expect.unreachable("expected StableModeCacheMissError");
     } catch (e) {
       expect(e).toBeInstanceOf(StableModeCacheMissError);
-      const key = requestBodyKey(buildRequestBody(ARGS, "claude-opus-5"));
+      const key = requestBodyKey(buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct"));
       expect((e as StableModeCacheMissError).key).toBe(key);
       expect((e as Error).message).toContain(key);
     }
@@ -76,7 +76,7 @@ describe("replay port", () => {
 
   it("corrupt fixture surfaces a parse error, not a fake hit", async () => {
     const dir = await freshDir();
-    const key = requestBodyKey(buildRequestBody(ARGS, "claude-opus-5"));
+    const key = requestBodyKey(buildRequestBody(ARGS, "meta/llama-3.3-70b-instruct"));
     await new RecordingRationalePort(OK_PORT, dir).draft(ARGS);
     const { writeFile } = await import("node:fs/promises");
     await writeFile(`${dir}/${key}.json`, "{ not json", "utf8");

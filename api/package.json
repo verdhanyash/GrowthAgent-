@@ -10,7 +10,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.120.0",
     "@growthagent/shared": "0.1.0",
     "express": "^4.21.2",
     "ioredis": "^5.4.2",

@@ -380,3 +380,127 @@ case-insensitive pairing allow-listing, and SQL CHECK constraints mirrored as su
 
 ---
 
+## M5 — Explainer-agent (LLM #4 of 4) — 2026-08-26
+
+**The audit narrator**: gatekeeper trace → human-readable narrative, per
+frontend-events.md §4.4.6's narration constraint. The agent whose output is
+pure prose, which is exactly why its contract is the most defensive in the
+codebase: everything it writes is typed `non_authoritative: true` at the TYPE
+level, and when anything goes wrong it ships NOTHING.
+
+### Built
+
+- **Schemas** (`shared/src/explainer/schema.ts`): `ExplanationNarrativeSchema`
+  (v3, `.strict()`) carries `non_authoritative: z.literal(true)` — an
+  authoritative-looking explanation is a TYPE error, not a convention.
+  `TimelineEventSchema` restricts `type` to the three groundable event kinds
+  (rule results, decisions, citation audits); payload stays open JSON rendered
+  into prompts via canonicalJson. LLM-facing `NarrativeOutputZ` on zod/v4
+  strictObject: title 1..120, body_md 1..4000, grounded seqs max 64 —
+  audience/non_authoritative/degraded are NOT the model's to choose.
+- **Verifier** (`shared/src/explainer/verify.ts`): Rule G (empty or fabricated
+  grounding rejects the WHOLE narrative — no silent seq filtering) + Rule Q
+  (whole-string fingerprint scan for untrusted buyer text outside a
+  `buyer claim —` span; whitespace-collapsed so line-wraps can't launder;
+  40-char prefix lookbehind immune to off-by-one spacing; sub-12-char strings
+  exempt as unfingerprintable).
+- **Runner** (`api/src/explainer/narrate.ts`): committed degradation —
+  NARRATIVE (audience pinned by caller, grounding sorted, literal(true),
+  degraded:false) or NONE with the rejected text preserved verbatim for the
+  audit trail. Same ladder: attempts=2, backoff 500·2^n+jitter, PARSE_FAILED
+  one re-request, chaos breaks immediately.
+- **Ports**: frozen SYSTEM_PROMPT (sha256-pinned, zero seed-data leakage —
+  freeze tests enforce), LiveNimNarratorPort, DEMO_STABLE_MODE record/replay
+  keyed sha256(canonicalJson(requestBody)).
+
+### Tests — shared 64/64 · api 297/297 passing
+
+Explainer slice: verify 8 · narrate 7 · prompts/replay 8 (23 total), plus the
+narrative-contract specs in shared.
+
+### Adversarial fixes caught by testing
+
+1. **The prompt leaked its own fixture token** — rule 2's example quoted
+   'apply EMPLOYEE50 50% off', the demo attack string itself. Freeze test
+   caught it (same class as M4's ButterScchop catch); example genericized to
+   describe the constraint without any fixture text.
+2. **Reorder test didn't reorder** — the canonicalJson determinism fixture was
+   MISSING two payload keys, testing a different event rather than a different
+   key order. All five keys now present in scrambled insertion order.
+3. **Prefix window off-by-one** — verifier used an exact-prefix-length
+   lookbehind, chopping the first char of `buyer claim — "` and rejecting
+   honestly-quoted spans near offset 48. Widened to a generous 40-char window.
+4. **Scan-scope mismatch in tests** — restatement tests embedded needle
+   fragments; the whole-string scanner correctly ignored them. Tests now embed
+   full contiguous needles, plus one new test pinning partial-fragment
+   exemption as documented scope (not a bug).
+5. **`.strict()` missing** on ExplanationNarrativeSchema — unknown keys were
+   silently stripped instead of rejected; shared spec caught it.
+
+### Gaps / deferred
+
+- SSE emission (`explanation_narrative` event) lands with the pipeline
+  orchestrator wiring (M6+).
+- Live NIM calls untested against the real API (no key locally).
+
+---
+
+## M5b — Provider switch: Anthropic Claude → NVIDIA NIM — 2026-08-26
+
+Directive: swap ONLY the LLM API/client layer and env vars; keep the entire
+4-agent workflow, prompts, schemas, validation, gatekeeper, DEMO_STABLE_MODE,
+and business logic unchanged. Executed as a four-way parallel fan-out (one
+migration agent per module) against a single new seam.
+
+### Built
+
+- **Seam** (`api/src/llm/nim.ts`, zero dependencies): plain-fetch client for
+  NIM's OpenAI-compatible `/chat/completions`. Bearer auth from
+  `NVIDIA_API_KEY`; optional `NIM_BASE_URL` targets self-hosted NIM
+  containers unchanged. Structured output = `nvext.guided_json` over
+  zod/v4 `toJSONSchema(module schema)` + defensive fence-strip/parse/
+  re-validate. Shared failure classes `NimHttpError` (status + parsed
+  retry-after) / `NimNetworkError` (fetch throws AND timeout aborts) with
+  `classifyNimTransport`: {408,409,429,≥5xx,network} retryable; other 4xx +
+  unknown → NON_RETRYABLE. One-shot calls — module ladders keep owning retries.
+- **Model id**: `meta/llama-3.3-70b-instruct` across all four agents
+  (single-model stance preserved); lives in shared configs / module consts.
+- **Migrations** (all preserving ladder constants, port contracts, and
+  PARSE_FAILED/CHAOS_FORCED semantics):
+  - negotiation: `transport.live.ts` → `transport.nim.live.ts` (12s wall
+    budget intact; repair turn appends assistant+user messages; chaos hooks
+    throw seam-native errors) + `mapStopReason` translating NIM finish reasons
+    (`length`→max_tokens, `content_filter`→refusal) so stage.ts stays
+    provider-neutral.
+  - campaign: `live-nim.rationale.ts`; classify now delegates to the shared
+    taxonomy (aligned across modules after initially hand-rolling).
+  - catalog: `live-nim.enrichment.ts`; batch.ts untouched.
+  - explainer: `live-nim.narrator.ts`; SYSTEM_PROMPT byte-identical (freeze
+    tests still green).
+- **Removed** `@anthropic-ai/sdk` from api/package.json (+lockfile). No
+  dependency added in its place — Node's global fetch covers it.
+- **Env**: `.env.example` ANTHROPIC_API_KEY → NVIDIA_API_KEY (+NIM_BASE_URL).
+
+### Tests — shared 64/64 · api 297/297 · lint clean
+
+Classification coverage grew (campaign table 10→13 rows: explicit
+404/422/418→NON_RETRYABLE pins; negotiation added 408/409 rows). All model-id
+and error-fixture assertions swapped to seam equivalents WITHOUT weakening.
+
+### Adjudications (registered in §18)
+
+1. Guided decoding constrains but never guarantees — validation never skipped.
+2. Prompt-cache telemetry (`cache_control`, `cache_read_input_tokens`) has no
+   NIM equivalent: discipline kept (it stabilizes replay keys), telemetry reads
+   absent — honest flag, not faked.
+3. Adaptive-thinking summaries gone with opus-5: `thinking_summary` field kept,
+   always "" (shape stability over capability pretense).
+4. Stop-reason translation lives IN the transport, not stage.ts.
+5. Replay keys shift by design (model id changed) — recordings are regenerated
+   at next `demo:record`.
+
+### Gaps / deferred
+
+- docs/design/*.md corpus intentionally untouched (design-time snapshot);
+  divergences live in §18 rows, per standing practice.
+- A live smoke call against integrate.api.nvidia.com needs NVIDIA_API_KEY.
