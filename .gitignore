@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+build/
+*.tsbuildinfo
+
+# env & secrets — .env.example is committed, real .env NEVER
+.env
+.env.local
+.env.*.local
+
+# test/tooling artifacts
+coverage/
+.vitest/
+.eslintcache
+
+# logs
+*.log
+npm-debug.log*
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# demo runtime state (recordings ARE committed — see docs/design DEMO_STABLE_MODE)
+api/.demo-runtime/
+web/.vite/

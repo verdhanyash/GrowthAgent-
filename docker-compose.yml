@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: growthagent-pg
+    # Named volume, NOT a bind mount — NTFS bind mounts break initdb on Windows (DR-8)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "15432:5432"   # non-standard host port: dodges any local Postgres service
+    environment:
+      POSTGRES_DB: growthagent
+      POSTGRES_USER: growthagent_owner
+      POSTGRES_PASSWORD: growthagent_owner
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U growthagent_owner -d growthagent"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: growthagent-redis
+    ports:
+      - "16379:6379"   # non-standard host port: dodges Memurai/local Redis
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  pgdata:

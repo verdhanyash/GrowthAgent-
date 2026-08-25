@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Explicit dark ground — the host never paints through us (§6 visual direction). */
+body {
+  @apply bg-bg text-ink font-mono antialiased;
+}
