@@ -43,6 +43,9 @@ export interface CitationAuditResult {
   readonly tx_id: string;
   readonly pack_hash: string;
   readonly verdict: CitationVerdict;
+  /** How many claims entered the audit (pre-strip) — the SSE payload reports
+   *  exactly this; effective_proposal.claims is post-strip and would undercount. */
+  readonly checked_claims: number;
   readonly violations: readonly CitationViolation[];
   /** null iff FAILED (proposal discarded wholesale). */
   readonly effective_proposal: NegotiationProposal | null;
@@ -449,6 +452,7 @@ export function auditCitations(
       tx_id: opts.tx_id,
       pack_hash: pack.pack_hash,
       verdict,
+      checked_claims: proposal.claims.length,
       violations: Object.freeze(violations),
       effective_proposal: eff,
       flags: Object.freeze({
