@@ -247,6 +247,12 @@ export async function runPipeline(deps: PipelineDeps, input: RunInput): Promise<
       now_iso: nowIsoOf(),
       tx_id: input.tx_id,
     });
+    // Pin the governing rules version on the tx (E-09) so the HTTP poll can
+    // surface `rules_version_applied` for every terminal outcome.
+    await db.query(`UPDATE proposal_txs SET rules_version=$2, updated_at=now() WHERE tx_id=$1`, [
+      input.tx_id,
+      result.rules_version,
+    ]);
     const runId = `gkrun_${createHash("sha256").update(result.input_digest).digest("hex").slice(0, 12)}`;
     for (const e of result.trace) {
       const seq = await emitter.emit(input.tx_id, "gatekeeper_rule_result", {

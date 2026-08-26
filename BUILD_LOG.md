@@ -621,3 +621,101 @@ a type cast (same effect); velocity FIRST-insert bypassing both ceilings.
 - AMBIGUOUS-order adoption via fetch-by-receipt (U1 ⚠️) unimplemented; ops
   inbox path stands.
 - SSE fan-out of audit events to the web trace is a later module's wire-up.
+
+## M7 — Pipeline orchestrator (`api/src/pipeline/`) — 2026-08-27
+
+The spine that runs a proposal end-to-end: INTAKE → CONTEXT_BUILD →
+CAMPAIGN_INJECT → NEGOTIATE → CITATION_AUDIT → GATEKEEPER → (SETTLE | ESCALATE |
+DECLINE) → EXPLAIN, over the pure gatekeeper and the real settlement rail. Every
+LLM stage proposes; the deterministic gate disposes.
+
+- **`orchestrator.ts`** (`runPipeline`): claims `proposal_txs` on a unique tx_id
+  (`ON CONFLICT DO NOTHING` → `PipelineAlreadyRunError`, so replays never
+  re-enter), walks the stages behind a `RunCtx` that stamps `stage`/`updated_at`
+  per transition, and finishes into one of four terminal `outcome_json` shapes.
+  `resumeAfterApproval`/`rejectAfterRejection` re-enter from the approvals inbox.
+- **Audit hash chain** (`audit-chain.ts`): the deferred-from-M6 seq/prev_hash
+  chain — `append` links each row to the GLOBAL predecessor; `tailFor(txId,
+  afterSeq)` replays one tx's durable history; `verify` walks global OR per-tx.
+- **Event fabric** (`emitter.ts` + `bus.ts`): `PipelineEmitter.emit` validates
+  payloads against the shared taxonomy ON WRITE, persists through the chain,
+  publishes durable envelopes on the in-process `TraceBus` (per-tx + admin
+  channels); ephemeral events are bus-only (no seq, no SSE id). Pure frame
+  formatters (`formatDurableFrame`/`formatEphemeralFrame`/`formatCommentPing`)
+  make the wire shape unit-testable without a socket. `ChainedAuditSink` bridges
+  settlement's synchronous `appendAudit` onto the one true chain.
+- **Injection tagger** (`tagger.ts`): heuristic scan of the untrusted note; a
+  suspected hit emits `injection_flagged` and drives the ESCALATE path.
+- **Evidence + cart** (`evidence.ts`, `cart-adapter.ts`): deterministic pack the
+  model may only cite from (R1 integrity), and the adapter that turns an
+  approved proposal into the settleable cart the money rail consumes.
+- **Approvals** (`approvals.ts`, V8 `approvals` table): freeze the proposal into
+  a PENDING inbox row with band context + gate trace; token-guarded resolve.
+
+### Tests — 8 pipeline suites incl. the 316-line end-to-end integration spec
+
+Full-stack runs over real Postgres: honest APPROVE→AWAITING_PAYMENT with stock
+held, DECLINE on exhausted velocity (real reasons recorded), ESCALATE on an
+injection note (cart frozen into the inbox), plus chain verify, bus ordering,
+tagger, evidence, and cart-adapter units.
+
+## M8 — Buyer-facing HTTP/API layer (`api/src/http/`) — 2026-08-27
+
+The public surface an autonomous buyer agent talks to. Async-job POST → detached
+pipeline → poll/SSE, all riding the M7 orchestrator and M6 settlement rail
+underneath. The HTTP layer never writes `proposal_txs` (the pipeline claims it)
+nor `transactions` (settle owns it) — it owns exactly three tables (V9).
+
+- **Auth** (`auth.ts`): `X-Agent-Key` (or `Bearer` alias) → sha256 → indexed
+  lookup on `agent_identities.api_key_hash`, revocation re-checked every request;
+  `requireAgent(db, role)` attaches `req.agent`.
+- **POST /v1/carts/proposals** (`proposals.route.ts`): validate →
+  `reqHash = sha256(canonicalJson(body))` → claim `proposal_idempotency`
+  (unique `(agent_id, key)`) which MINTS the tx_id in the same statement →
+  enqueue `runPipeline` detached → 202. A same-key same-body replay returns the
+  SAME tx_id (`idempotent_replay:true`); same-key different-body is 409
+  IDEMPOTENCY_CONFLICT; an `Idempotency-Key` header that disagrees with the body
+  is 400.
+- **GET /v1/carts/proposals/:txId**: ownership resolves on
+  `proposal_idempotency` (written SYNCHRONOUSLY in the POST), NOT `proposal_txs`
+  (claimed async) — so a poll that races ahead of the pipeline reports PROPOSING
+  instead of a spurious 404; foreign/unknown → uniform 404 (no existence
+  oracle, E-13). Terminal projection reshapes each stored `outcome_json` into
+  the §5.2 union: APPROVED lazily mints the signed mandate + settlement info,
+  DECLINED surfaces reasons, ESCALATED loads the approval row (rules_version
+  from `frozen_proposal.gatekeeper.ruleset_version`), FAILED synthesizes a stage.
+- **MandateBuilder** (`mandate-builder.ts`): NO numeric field from an LLM —
+  `subtotal` from RAW GT list prices, `total` from `transactions
+  .approved_total_paise` (authoritative), signed with the merchant HMAC and
+  SELF-VERIFIED before shipping; persisted once so nonce/expires_at stay stable.
+- **SSE** (`stream.route.ts`, `stream-ticket.ts`): `POST /v1/stream-tickets`
+  mints a 60s `{agent_id,tx_id}`-bound ticket (browsers can't header-auth
+  EventSource); `GET /v1/stream/:txId` authenticates by ticket OR X-Agent-Key,
+  enforces ownership BEFORE the SSE upgrade, then runs the race-free connect
+  sequence — subscribe FIRST → replay durable history after Last-Event-ID →
+  drain what buffered (dedup by seq) → forward live, with a 15s comment-ping
+  heartbeat and a ~1s `outcome_json` poll that closes the stream on terminal.
+- **Composition** (`app.ts`, `server.ts`): `buildApiApp` wires requestContext →
+  (optional webhook raw router, reused from settlement) → buyer routes → stream
+  routes → `jsonNotFound` → the single `apiErrorRenderer`. `server.ts` is the
+  guarded listen root; the orchestrator now persists `rules_version` on
+  `proposal_txs` at the gate so every terminal poll can report it.
+
+### Tests — api 424/424 (10 new HTTP integration tests) · tsc clean
+
+Real-stack loopback fetch against the actual pipeline (only the negotiation
+transport stubbed): POST→poll→signed-mandate happy path, idempotency
+replay/conflict, missing/unknown-key 401s, cross-agent 404, DECLINE + ESCALATE
+terminal projections, stream-ticket mint + verify, and the SSE replay-to-close
+lifecycle.
+
+### Gaps / deferred
+
+- `server.ts` mounts the buyer surface only; the settlement webhook router is
+  reusable via `buildApiApp({webhook})` but not wired into the standalone listen
+  (settlement runs its own app today) — flagged for the deploy/demo milestone.
+- groundTruth/rules/priorities are wired to the static Meera fixtures at the
+  composition root; DB-backed catalog/rules loading is a later wire-up.
+- Admin + demo-control routes (api-contract §1 rows 6–18) remain deferred.
+
+

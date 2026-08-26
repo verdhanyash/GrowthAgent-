@@ -167,3 +167,58 @@ export {
   type AnyEnvelope,
   type AuditEnvelope,
 } from "./events.js";
+
+/* external HTTP contract (api-contract.md §2–§6) — buyer surface, error
+ * envelope, cart mandate. zod-3.25-compatible authoring. */
+export {
+  Paise as ApiPaise,
+  TxId as ApiTxId,
+  MandateId,
+  ApprovalId,
+  Sku as ApiSku,
+  IsoDateTime,
+  RulesVersion,
+  HexSha256,
+  codePoints,
+} from "./api/primitives.js";
+export {
+  ErrorCode,
+  ApiErrorEnvelope,
+  HttpError,
+  type HttpErrorOpts,
+} from "./api/errors.js";
+export {
+  CartMandateItemSchema,
+  CartMandateSchema,
+  canonicalCartView,
+  signablePreimage,
+  arithmeticConsistent,
+  verifyCartMandate,
+  type CartMandate,
+  type CartMandateItem,
+  type MandateCrypto,
+  type VerifyResult as MandateVerifyResult,
+} from "./api/cart-mandate.js";
+export {
+  CustomerRequestSchema,
+  UntrustedPayloadSchema,
+  CreateProposalRequestSchema,
+  ProposalAcceptedSchema,
+  PROPOSAL_STAGES,
+  ProposalStage,
+  ProposalStageNonTerminal,
+  ProposalPendingSchema,
+  DeclineReasonSchema,
+  SettlementInfoSchema,
+  ApprovalRequestSchema,
+  TerminalOutcomeSchema,
+  ProposalTerminalSchema,
+  ProposalStatusResponse,
+  TxParamsSchema,
+  StreamTicketRequestSchema,
+  StreamTicketResponseSchema,
+  type CreateProposalRequest,
+  type ProposalAccepted,
+  type ApprovalRequest,
+  type StreamTicketResponse,
+} from "./api/contracts.js";
