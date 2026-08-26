@@ -504,3 +504,120 @@ and error-fixture assertions swapped to seam equivalents WITHOUT weakening.
 - docs/design/*.md corpus intentionally untouched (design-time snapshot);
   divergences live in §18 rows, per standing practice.
 - A live smoke call against integrate.api.nvidia.com needs NVIDIA_API_KEY.
+
+## M6 — Settlement module (`api/src/settlement/`) — 2026-08-26
+
+The deliberately-dumb money rail per docs/design/settlement.md: AI proposed the
+cart everywhere upstream, ONE deterministic pipeline settles exactly those
+frozen bytes. Zero LLM. First DB-touching module of the repo — everything M1–M5
+was pure.
+
+### Built
+
+- **Schema** (`api/migrations/V7__settlement.sql`, first migration ever):
+  transactions (12-state CHECK, frozen `proposal_bytes` + digest,
+  BIGINT paise), inventory (Model-A hold counters + table-level CHECK),
+  stock_reservations (UNIQUE(tx_id,sku) — resurrection reuses rows),
+  identity_velocity (per-identity-per-day ledger), razorpay_orders
+  (INTENT/CREATED/AMBIGUOUS lifecycle), processed_webhook_events (insert-first
+  dedupe + payload bytes for W6 redrive), completed_sales, idempotency_keys.
+  Plus `db/client.ts`: pool factory + file-ordered transactional migration
+  applier tracked in schema_migrations.
+- **State machine**: T1…T13 authority TABLE as data; every state write goes
+  through `casTransition()` (single guarded UPDATE, timestamp column stamped by
+  arrival state, pay_id bound on T7). Illegal pairs AUDITED
+  (`illegal_transition_attempt`); legal-but-lost races reported distinctly.
+- **Reservation core** (`reserve.ts`): whole-cart-in-one-transaction with the
+  conditional-UPDATE guard (`stock_qty - reserved >= q`) as the only way
+  reserved ever grows; lexicographic SKU ordering kills deadlocks;
+  identity_velocity upsert closes the TB-2b TOCTOU under row lock; release is
+  a status-CAS noop-on-retry; `reReserveExpiredHolds` flips the tx's own
+  EXPIRED holds back ACTIVE for the grace ladder (UNIQUE(tx_id,sku) forbids
+  fresh inserts).
+- **Idempotency layer 1** (Redis SET NX PX + finalize-only Lua; DONE snapshots
+  never overwritten) with durable PG twin. Fail-closed on Redis loss:
+  degraded PG replay if one exists, else 503 — never process unmarked money
+  POSTs. Verbatim replay + `Idempotency-Replayed: true`; key+body mismatch 422.
+- **Idempotency layer 2** (`ensure-order.ts`): claim-first CAS into
+  ORDER_CREATING; intent row persisted BEFORE the network call; deterministic
+  receipt = fn(tx_id) so crash windows W3/W4 resolve through the SAME receipt —
+  provider-saw-it ambiguity surfaces as DuplicateReceiptError → AMBIGUOUS +
+  ops event, never a blind third attempt.
+- **settle()**: digest re-check over frozen bytes → T1 insert (ON CONFLICT →
+  409 TX_ALREADY_SETTLED) → reserve or RELEASED-refuse → order-create with
+  retryable-degradation (503, holds retained) vs hard-fail (T5 release +
+  FAILED).
+- **Webhook ingress** (`webhook-handler.ts`): raw-body parser mounted FIRST;
+  authenticate (HMAC over exact bytes, V7) before parsing anything;
+  freshness gate; insert-first dedupe two-phase RECEIVED→PROCESSED (crash can't
+  swallow an event — sweeper redrives); ALWAYS 2xx once authenticated (V8/V9).
+  onCapture triple-match (amount/currency/receipt) + frozen-bytes re-hash +
+  armed-provider check BEFORE any state move; mismatch ⇒ MANUAL_REFUND_REQUIRED
+  + inbox item, never auto-complete. payment.failed ⇒ T8 + instant hold
+  release. Late capture ⇒ §10.3 ladder T10 (grace re-reserve) / T11 (refund).
+- **Completion** (`completion.ts`): PAID→COMPLETED latch inside one
+  transaction; holds→sold moves all-guarded; committed units reconciled
+  against the FROZEN proposal lines — a short/vanished hold set aborts the
+  latch-open commit for sweep retry instead of silently booking a sale.
+- **Sweeper** (`sweeper.ts`): TTL pass pair (tx flip decoupled from counter
+  release) + reconciliation ladder W1–W7: resume reserve/order-create,
+  same-receipt INTENT retry (+W5 healing of CREATED-with-lagging-state),
+  RECEIVED-event redrive via the shared dispatch core, PAID completion drive.
+- **Providers**: MockProvider signs REAL envelopes through the shared
+  builder/HMAC path (dogfooding; no mock bypass) and mails them over real
+  loopback HTTP in tests; razorpay adapter (Basic-auth REST createOrder +
+  verifyAndParseWebhook delegation) built to the same narrow two-method seam,
+  TEST_MODE boot-asserted fail-closed.
+- **HTTP surface** (`routes.ts`): POST /v1/tx/settle (json → idempotency gate →
+  SettleRequest schema), GET /v1/tx/:tx_id, POST /webhooks/razorpay (raw),
+  typed-error mapper last. `buildSettlementApp()` is the composition root the
+  pipeline milestone reuses as-is.
+- **Audit seam** (`api/src/audit/writer.ts`): structured events through one
+  sink; MemoryAuditSink for tests/SSE later.
+
+### Tests — api 356/356 across 29 files · lint clean · tsc clean
+
+Settlement adds 59 tests in 5 suites: sign/parsing 16 (pinned V10/V11 shapes,
+rotation, length-burn compare, PARSE_FAILED-vs-auth separation), state machine
+9 (full 12×12 pair enumeration against table AND DB CAS, rerun-idempotence,
+vanished-hold atomicity), reserve 12 (20-worker last-unit race, velocity race
+ceilings, fast-check invariant property over randomized interleavings, TTL +
+grace-row reuse), idempotency 8 (layer-1 semantics incl. TTL reuse + degraded
+replay; W3 same-receipt retry; AMBIGUOUS no-blind-retry; concurrent claim
+election), integration 14 (full HTTP loopback happy path, replay/burst/distinct
+-races, duplicate event, chaos→sweep recovery on SAME receipt, stale letters,
+loopback-vs-direct equivalence, T10/T11 end-to-end).
+
+The suite earned its keep immediately — five production bugs caught & fixed
+pre-commit: missing T4b advance (happy path could never reach AWAITING_PAYMENT);
+`RETURNING DISTINCT` invalid SQL; BIGINT-as-string vs numeric wire amount
+(flagged every honest capture as a mismatch); SELECT/alias key mismatch behind
+a type cast (same effect); velocity FIRST-insert bypassing both ceilings.
+
+### Adjudications
+
+1. `digestView` convention: proposal_sha256 binds every frozen byte EXCEPT
+   itself (field participates as ""); producer and verifiers hash that view.
+2. MANUAL_REFUND_REQUIRED edges granted to every stock/payment-holding state
+   (§8.3 tamper path vs §6 T-table gap); PROPOSAL_APPROVED excluded — nothing
+   to refund there.
+3. processed_webhook_events carries the authenticated payload bytes (beyond
+   spec sketch) so W6 redrive re-dispatches without re-trusting headers (U4).
+4. Sweeper lane 3 widened to CREATED-with-lagging-state rows (W5 healing rides
+   the same-receipt lane).
+5. Audit hash-chain (seq/prev_hash/verify) deferred to the pipeline milestone —
+   vocabulary final now, chain not yet.
+6. HUMAN_ESCALATION re-entry refuses 501 ESCALATION_REENTRY_NOT_WIRED until the
+   approvals inbox lands (consumeApprovalToken seam already in SettleDeps).
+7. Velocity ceilings fully enforced at commit-time but buyer-identity wiring
+   arrives with the pipeline; absent input ⇒ no ledger increment.
+8. transactions owns its slice: TEXT ULID tx_id + TEXT CHECK state vocabulary
+   (no PG enum) for cheap evolution.
+
+### Gaps / deferred
+
+- Razorpay TEST_MODE adapter never spoke to the live API (no keys locally) —
+  error-code heuristics marked U2 stay heuristic.
+- AMBIGUOUS-order adoption via fetch-by-receipt (U1 ⚠️) unimplemented; ops
+  inbox path stands.
+- SSE fan-out of audit events to the web trace is a later module's wire-up.

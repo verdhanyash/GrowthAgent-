@@ -24,6 +24,9 @@ export const Paise = z
   .int("money must be integer paise")
   .nonnegative()
   .lte(Number.MAX_SAFE_INTEGER);
+/** Declaration merge (same-name z.infer) so importers can use `Paise` as a
+ *  TYPE too — settlement/provider DTOs annotate money fields with it. */
+export type Paise = z.infer<typeof Paise>;
 
 /** Percentages validated as decimals (e.g. 7.5). Converted to integer basis
  *  points ONCE at config/proposal load; decisions never see floats. */

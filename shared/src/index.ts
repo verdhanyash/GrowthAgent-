@@ -136,6 +136,20 @@ export {
   type VerifyContext,
 } from "./explainer/verify.js";
 
+/* settlement-agent wire contracts (settlement.md §3, verbatim). The schema
+ * consts carry their z.infer types under the same name (declaration merge),
+ * so one export binds both; TxState is a bare union => type-only re-export. */
+export {
+  Currency,
+  digestView,
+  SettleRequest,
+  SettleableProposal,
+  SettlementLine,
+  TX_STATES,
+  Ulid,
+} from "./settlement.js";
+export type { TxState } from "./settlement.js";
+
 /* SSE audit-event envelope + taxonomy (frontend-events.md §1) */
 export {
   TxId,
