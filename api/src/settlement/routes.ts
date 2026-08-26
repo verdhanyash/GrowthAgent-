@@ -42,6 +42,17 @@ export interface SettlementRoutesDeps {
   readonly settleDeps: SettleDeps;
   readonly webhookDeps: WebhookHandlerDeps;
   readonly stores: SettlementStores;
+  /**
+   * The buyer routes (`POST /v1/tx/settle`, `GET /v1/tx/:tx_id`) are
+   * UNAUTHENTICATED and `settle()` trusts a self-asserted `GATEKEEPER_AUTO`
+   * verdict + amount on the request body. That is safe only because the
+   * production pipeline calls `settle()` in-process (never over this HTTP
+   * surface) — `buildApiApp` deliberately does NOT mount this app. To stop the
+   * loaded gun from ever firing by accident, `buildSettlementApp` refuses to
+   * build under NODE_ENV=production unless this flag is set true after an auth
+   * layer has been added in front of the buyer routes.
+   */
+  readonly allowUnauthenticatedInProd?: boolean;
 }
 
 /** The webhook route — raw-body capture BEFORE any JSON parsing (V7). */
@@ -158,6 +169,15 @@ export function settlementErrorMiddleware(): (
 /** Module composition root: raw-body webhook FIRST, then JSON-parsed buyer
  *  routes, then the typed error mapper last. */
 export function buildSettlementApp(deps: SettlementRoutesDeps): Express {
+  if (process.env.NODE_ENV === "production" && deps.allowUnauthenticatedInProd !== true) {
+    throw new Error(
+      "[settlement] refusing to build in production: buyerRoutes expose an " +
+        "UNAUTHENTICATED /v1/tx/settle that trusts a self-asserted GATEKEEPER_AUTO " +
+        "verdict + amount. This composition root is for the test harness / in-process " +
+        "pipeline only (buildApiApp does not mount it). Add an auth layer, then set " +
+        "allowUnauthenticatedInProd:true to acknowledge.",
+    );
+  }
   const app = express();
   app.disable("x-powered-by");
   app.use(webhookRoute(deps.webhookDeps)); // raw parser — MUST precede json()

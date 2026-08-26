@@ -33,6 +33,32 @@ import { buildCartMandate, DEFAULT_MANDATE_TTL_MS, DEV_MERCHANT_SIGNING_SECRET }
 const PORT = Number(process.env.API_PORT ?? 3000);
 const RULES_VERSION = 3; // matches the emitter/audit rules_version stamped this build
 const DEV_TICKET_SECRET = "ga-stream-ticket-secret-dev-only";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+/**
+ * Resolve a signing secret, failing CLOSED in production. The repo-committed dev
+ * fallbacks exist ONLY to keep the zero-config demo booting outside production;
+ * in production an unset (or dev-equal) secret refuses boot rather than silently
+ * signing mandates/tickets with a value that ships in git (any reader of the
+ * repo could then forge them). Non-production boots loudly with the fallback.
+ */
+function resolveSigningSecret(name: string, devFallback: string): string {
+  const provided = process.env[name];
+  if (provided !== undefined && provided.trim() !== "" && provided !== devFallback) {
+    return provided;
+  }
+  if (IS_PRODUCTION) {
+    throw new Error(
+      `[api] refusing to boot: ${name} must be set to a real secret in production ` +
+        `(it is unset or equal to the committed dev fallback). Set ${name} in the environment.`,
+    );
+  }
+  console.warn(
+    `[api] WARNING: ${name} is unset — using the committed dev fallback. ` +
+      `Safe ONLY for local/demo; a production boot would refuse this.`,
+  );
+  return devFallback;
+}
 
 export function greeting(): string {
   return `growthagent api ${SHARED_PACKAGE_VERSION} — gatekeeper pending (M1)`;
@@ -81,8 +107,8 @@ export async function buildServer(): Promise<ApiServer> {
     approvalTtlMs: DEFAULT_MANDATE_TTL_MS,
   };
 
-  const signingSecret = process.env.MERCHANT_SIGNING_SECRET ?? DEV_MERCHANT_SIGNING_SECRET;
-  const ticketSecret = process.env.STREAM_TICKET_SECRET ?? DEV_TICKET_SECRET;
+  const signingSecret = resolveSigningSecret("MERCHANT_SIGNING_SECRET", DEV_MERCHANT_SIGNING_SECRET);
+  const ticketSecret = resolveSigningSecret("STREAM_TICKET_SECRET", DEV_TICKET_SECRET);
 
   const app = buildApiApp({
     db: pool,

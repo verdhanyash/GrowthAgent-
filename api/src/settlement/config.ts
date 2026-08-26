@@ -69,10 +69,20 @@ export function loadSettlementConfig(
 ): SettlementConfig {
   const failures: string[] = [];
 
+  const isProduction = env["NODE_ENV"] === "production";
   const rawProvider = env["RAZORPAY_PROVIDER"];
+  const providerUnset = rawProvider === undefined || rawProvider === "";
+  // Fail CLOSED in production: an unset provider silently means MOCK, which in
+  // turn arms MOCK_DEV_WEBHOOK_SECRET — a committed dev secret. Never in prod.
+  if (providerUnset && isProduction) {
+    failures.push(
+      "RAZORPAY_PROVIDER must be set explicitly in production " +
+        "(refusing to default to MOCK, which arms a committed dev webhook secret)",
+    );
+  }
   const providerMode: ProviderMode | null =
-    rawProvider === undefined || rawProvider === ""
-      ? "MOCK" // default MOCK when unset (§6.6)
+    providerUnset
+      ? "MOCK" // default MOCK when unset (§6.6) — non-production only; prod fails above
       : rawProvider === "MOCK" || rawProvider === "TEST_MODE"
         ? rawProvider
         : null;

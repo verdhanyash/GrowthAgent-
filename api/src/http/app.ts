@@ -21,6 +21,7 @@ import type { TraceBus } from "../pipeline/bus.js";
 import type { RunInput } from "../pipeline/orchestrator.js";
 import { requestContext, jsonNotFound, apiErrorRenderer } from "./errors.js";
 import { requireAgent } from "./auth.js";
+import { rateLimit } from "./rate-limit.js";
 import { proposalRoutes } from "./proposals.route.js";
 import { streamRoutes } from "./stream.route.js";
 
@@ -38,6 +39,10 @@ export interface ApiAppDeps {
   readonly webhook?: Router | undefined;
   readonly heartbeatMs?: number | undefined;
   readonly terminalPollMs?: number | undefined;
+  /** Transport-layer limiter tuning for the mutating POSTs (RATE_LIMITED_HTTP).
+   *  Defaults to a generous per-agent burst so the poll/SSE paths (never
+   *  limited) and normal demo traffic are unaffected. */
+  readonly rateLimit?: { readonly capacity: number; readonly refillPerSec: number } | undefined;
 }
 
 export function buildApiApp(deps: ApiAppDeps): Express {
@@ -49,9 +54,17 @@ export function buildApiApp(deps: ApiAppDeps): Express {
   // Webhook FIRST — its express.raw() must see the body before any json().
   if (deps.webhook !== undefined) app.use(deps.webhook);
 
+  // Transport-layer rate limit on the EXPENSIVE mutating POSTs only — proposal
+  // create fires a pipeline, stream-ticket mint signs a credential. The cheap
+  // poll GET and long-lived SSE GET are deliberately never limited.
+  const rl = deps.rateLimit ?? { capacity: 30, refillPerSec: 10 };
+  const limiter = rateLimit(rl);
+
   // Buyer proposal surface is agent-authenticated; the SSE GET is NOT (browsers
   // can't set headers — it authenticates via ticket/X-Agent-Key on its own).
   app.use("/v1/carts/proposals", requireAgent(deps.db, "buyer_agent"));
+  app.post("/v1/carts/proposals", limiter); // after auth → keys by agent id
+  app.post("/v1/stream-tickets", limiter); // before streamRoutes' own auth → keys by IP
   app.use(
     proposalRoutes({
       db: deps.db,
