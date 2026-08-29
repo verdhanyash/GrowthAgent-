@@ -161,9 +161,19 @@ const GatekeeperDecisionZ = z.object({
 const InjectionFlaggedZ = z.object({
   detector: z.literal("HEURISTIC_TAGGER"), // deterministic, OUTSIDE LLM trust
   patterns_matched: z.array(z.string()), // e.g. ["SYSTEM_NOTE_SPOOF","DISCOUNT_OVERRIDE_TOKEN"]
-  matched_snippets: z.array(z.string()),
+  // Bounded CONTRACTUALLY, not just by the producer: the tagger already caps
+  // each snippet at 160 chars and can match at most one hit per pattern (5),
+  // so these limits never reject a legitimate emit — they stop a future
+  // detector from turning this frame into an unbounded attacker-text channel.
+  matched_snippets: z.array(z.string().max(160)).max(8),
   severity: z.enum(["LOW", "MEDIUM", "HIGH"]),
-  customer_note_full: z.string(), // manipulative text shown VERBATIM in red banner
+  // Bounded preview shown in the red banner (full note is persisted server-side
+  // in proposal_txs.request_bytes); prevents a hostile note from dumping
+  // unbounded attacker text to every subscriber. matched_snippets keep forensics.
+  // NOTE: the preview is CONTEXT, not evidence — a note can pad 280+ benign
+  // chars before the injection, so the banner must quote matched_snippets.
+  customer_note_preview: z.string().max(280),
+  customer_note_len: z.number().int().nonnegative(),
   agent_identity_hash: z.string(),
   velocity_counter_incremented: z.boolean(),
 });

@@ -335,9 +335,10 @@ const Degraded = z.object({
 const InjectionFlagged = z.object({
   detector: z.literal("HEURISTIC_TAGGER"),    // deterministic regex/heuristics OUTSIDE LLM trust
   patterns_matched: z.array(z.string()),      // e.g. ["SYSTEM_NOTE_SPOOF","DISCOUNT_OVERRIDE_TOKEN"]
-  matched_snippets: z.array(z.string()),      // quoted substrings from customer_note
+  matched_snippets: z.array(z.string().max(160)).max(8), // quoted substrings from customer_note
   severity: z.enum(["LOW","MEDIUM","HIGH"]),
-  customer_note_full: z.string(),             // manipulative text shown VERBATIM in red banner
+  customer_note_preview: z.string().max(280),  // bounded excerpt for the banner (full note stays server-side)
+  customer_note_len: z.number().int().nonnegative(), // true length, so the UI can disclose truncation
   agent_identity_hash: z.string(),            // offending buyer identity (hashed key)
   velocity_counter_incremented: z.boolean(),
 });
@@ -632,8 +633,11 @@ function InjectionBanner(props: { inj: InjectionFlagged; declinedBy: RuleId[];
 // Phase 1 (injection_flagged arrived, no decision yet): header "⚠ INJECTION ATTEMPT DETECTED".
 // Phase 2 (decision === DECLINE_WITH_REASON): header upgrades to "⛔ INJECTION BLOCKED BY GATEKEEPER"
 //   and lists catching rules: "Caught by: MAX_DISCOUNT_PCT, MARGIN_FLOOR_BLENDED".
-// Body: <blockquote className="font-mono">{customer_note_full}</blockquote> — manipulative text quoted
-//   VERBATIM; patterns_matched as small chips; offending agent fingerprint (key_hash prefix).
+// Body: <blockquote className="font-mono">{matched_snippets.map(...)}</blockquote> — the EVIDENCE is the
+//   matched snippets (quoted verbatim, each ≤160 chars). {customer_note_preview} renders below as
+//   CONTEXT only, with "… (N of customer_note_len chars)" when customer_note_len > 280 — a hostile
+//   note can pad benign text past the preview window, so the preview alone may not show the attack.
+//   patterns_matched as small chips; offending agent fingerprint (key_hash prefix).
 // Dismiss button; reappears fresh on new transactions.
 
 function EscalationModal(props: { created: EscalationCreated; resolved: EscalationResolved | null;

@@ -16,9 +16,10 @@ import express, {
   type Response,
   type Router,
 } from "express";
-import { SettleRequest } from "@growthagent/shared";
+import { HttpError, SettleRequest } from "@growthagent/shared";
 import { auditGlobal } from "../audit/writer.js";
 import type { PgPool } from "../db/client.js";
+import { requireAgent } from "../http/auth.js";
 import { settle } from "./settle.js";
 import type { SettleDeps } from "./settle.js";
 import { SettlementRejectedError } from "./errors.js";
@@ -43,16 +44,18 @@ export interface SettlementRoutesDeps {
   readonly webhookDeps: WebhookHandlerDeps;
   readonly stores: SettlementStores;
   /**
-   * The buyer routes (`POST /v1/tx/settle`, `GET /v1/tx/:tx_id`) are
-   * UNAUTHENTICATED and `settle()` trusts a self-asserted `GATEKEEPER_AUTO`
-   * verdict + amount on the request body. That is safe only because the
-   * production pipeline calls `settle()` in-process (never over this HTTP
-   * surface) — `buildApiApp` deliberately does NOT mount this app. To stop the
-   * loaded gun from ever firing by accident, `buildSettlementApp` refuses to
-   * build under NODE_ENV=production unless this flag is set true after an auth
-   * layer has been added in front of the buyer routes.
+   * The buyer routes (`POST /v1/tx/settle`, `GET /v1/tx/:tx_id`) now require a
+   * valid buyer-agent key (`requireAgent`) and the read route enforces tx
+   * OWNERSHIP — closing the unauthenticated hole. What auth still CANNOT prove
+   * is that the gatekeeper actually approved: `settle()` trusts a self-asserted
+   * `GATEKEEPER_AUTO` verdict + amount on the request body, and in production
+   * approval is established by calling `settle()` in-process (never over this
+   * HTTP surface) — `buildApiApp` deliberately does NOT mount this app. So even
+   * authenticated, this composition root stays test-harness / in-process only;
+   * `buildSettlementApp` refuses to build under NODE_ENV=production unless this
+   * flag is set true to acknowledge the residual self-asserted-verdict risk.
    */
-  readonly allowUnauthenticatedInProd?: boolean;
+  readonly allowSelfAssertedVerdictInProd?: boolean;
 }
 
 /** The webhook route — raw-body capture BEFORE any JSON parsing (V7). */
@@ -76,8 +79,9 @@ export function webhookRoute(deps: WebhookHandlerDeps): Router {
 export function buyerRoutes(deps: SettlementRoutesDeps): Router {
   const router = express.Router();
   const gate = idempotencyGate(deps.stores.redis, deps.stores.pg);
+  const auth = requireAgent(deps.db, "buyer_agent");
 
-  router.post("/v1/tx/settle", express.json({ limit: "256kb" }), gate, async (req, res, next) => {
+  router.post("/v1/tx/settle", auth, express.json({ limit: "256kb" }), gate, async (req, res, next) => {
     try {
       const parsed = SettleRequest.safeParse(req.body);
       if (!parsed.success) {
@@ -85,7 +89,9 @@ export function buyerRoutes(deps: SettlementRoutesDeps): Router {
       }
       let result;
       try {
-        result = await settle(parsed.data.proposal, deps.settleDeps);
+        // Stamp the authenticated caller as the tx owner (E-11) so the read
+        // route can enforce ownership. requireAgent guarantees req.agent here.
+        result = await settle(parsed.data.proposal, deps.settleDeps, { ownerAgentId: req.agent!.agentId });
       } catch (e) {
         // Failed start: release the key so the same id can retry cleanly (§8.1).
         await abortIdempotency(res, deps.stores.redis);
@@ -98,22 +104,28 @@ export function buyerRoutes(deps: SettlementRoutesDeps): Router {
     }
   });
 
-  router.get("/v1/tx/:tx_id", async (req, res, next) => {
+  router.get("/v1/tx/:tx_id", auth, async (req, res, next) => {
     try {
       const row = await deps.db.query(
         `SELECT t.tx_id, t.state, t.approved_total_paise, t.proposal_bytes, t.provider_kind,
                 t.pay_id, t.created_at, t.paid_at, t.expired_at, t.completed_at, t.failed_at,
-                o.rzp_order_id
+                t.agent_id, o.rzp_order_id
            FROM transactions t
        LEFT JOIN razorpay_orders o USING (tx_id)
           WHERE t.tx_id = $1`,
         [req.params.tx_id],
       );
+      // Uniform 404 for both "no such tx" AND "not your tx" — never leak the
+      // existence of another agent's transaction via a distinguishable 403.
       if ((row.rowCount ?? 0) === 0) {
         res.status(404).json({ code: "TX_NOT_FOUND" });
         return;
       }
       const t = row.rows[0] as Record<string, unknown>;
+      if (t.agent_id !== req.agent!.agentId) {
+        res.status(404).json({ code: "TX_NOT_FOUND" });
+        return;
+      }
       const proposal = t.proposal_bytes as { lines?: unknown[] };
       res.status(200).json({
         tx_id: t.tx_id,
@@ -149,6 +161,17 @@ export function settlementErrorMiddleware(): (
 ) => void {
   return (err, _req, res, _next) => {
     if (res.headersSent) return;
+    // Auth/authorization rejections arrive as shared `HttpError` from
+    // `requireAgent` (401 UNAUTHORIZED / 401 AGENT_KEY_REVOKED / 403 FORBIDDEN).
+    // They are rendered in THIS surface's flat `{code, description}` shape — the
+    // settlement routes predate the M8 `{error:{...}}` envelope and every
+    // settlement client/test reads `code` at the top level. Without this branch
+    // an unauthenticated request fell through to the catch-all below and
+    // surfaced as a misleading 500 INTERNAL.
+    if (err instanceof HttpError) {
+      res.status(err.status).json({ code: err.code, description: err.message });
+      return;
+    }
     if (err instanceof SettlementRejectedError) {
       res.status(err.httpStatus).json({ code: err.code, description: err.description, ...err.extra });
       return;
@@ -162,6 +185,10 @@ export function settlementErrorMiddleware(): (
       return;
     }
     auditGlobal("settlement.http", "unhandled_error", { err: String(err) });
+    // Parity with `apiErrorRenderer` (http/errors.ts): the audit row keeps only
+    // String(err), which drops the stack — log it once so an unexpected 500 on
+    // this surface is diagnosable without re-instrumenting the middleware.
+    console.error("[settlement] unhandled error:", err instanceof Error ? err.stack ?? err.message : String(err));
     res.status(500).json({ code: "INTERNAL", retryable: false });
   };
 }
@@ -169,13 +196,15 @@ export function settlementErrorMiddleware(): (
 /** Module composition root: raw-body webhook FIRST, then JSON-parsed buyer
  *  routes, then the typed error mapper last. */
 export function buildSettlementApp(deps: SettlementRoutesDeps): Express {
-  if (process.env.NODE_ENV === "production" && deps.allowUnauthenticatedInProd !== true) {
+  if (process.env.NODE_ENV === "production" && deps.allowSelfAssertedVerdictInProd !== true) {
     throw new Error(
-      "[settlement] refusing to build in production: buyerRoutes expose an " +
-        "UNAUTHENTICATED /v1/tx/settle that trusts a self-asserted GATEKEEPER_AUTO " +
-        "verdict + amount. This composition root is for the test harness / in-process " +
-        "pipeline only (buildApiApp does not mount it). Add an auth layer, then set " +
-        "allowUnauthenticatedInProd:true to acknowledge.",
+      "[settlement] refusing to build in production: /v1/tx/settle is now " +
+        "authenticated, but it still trusts a self-asserted GATEKEEPER_AUTO " +
+        "verdict + amount on the request body — any valid buyer key could settle " +
+        "an amount the gatekeeper never approved. This composition root is for the " +
+        "test harness / in-process pipeline only (buildApiApp does not mount it). " +
+        "Move approval proof onto the request (or keep settle() in-process), then " +
+        "set allowSelfAssertedVerdictInProd:true to acknowledge.",
     );
   }
   const app = express();

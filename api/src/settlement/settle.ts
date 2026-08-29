@@ -44,6 +44,17 @@ export interface SettleDeps {
   readonly consumeApprovalToken?: (p: SettleableProposal) => Promise<void>;
 }
 
+/** Per-CALL settle options (deps are per-app; these are per-request). */
+export interface SettleOptions {
+  /**
+   * Authenticated agent that owns this tx (E-11). Stamped into
+   * `transactions.agent_id` so the buyer read route can enforce ownership.
+   * Omitted ⇒ NULL (a settle with no attributable caller); the column is
+   * nullable so in-process/legacy callers stay valid.
+   */
+  readonly ownerAgentId?: string;
+}
+
 export interface SettleResult {
   readonly httpStatus: number;
   readonly response: {
@@ -59,7 +70,7 @@ export interface SettleResult {
 /** Deterministic receipt fn(tx_id) lives with its only writer (ensure-order). */
 export { receiptFor };
 
-export async function settle(p: SettleableProposal, deps: SettleDeps): Promise<SettleResult> {
+export async function settle(p: SettleableProposal, deps: SettleDeps, opts: SettleOptions = {}): Promise<SettleResult> {
   const { db, provider, config, clock } = deps;
 
   // -- step 1: shape-level trust checks ------------------------------------
@@ -91,8 +102,8 @@ export async function settle(p: SettleableProposal, deps: SettleDeps): Promise<S
   const inserted = await db.query(
     `INSERT INTO transactions
        (tx_id, state, proposal_bytes, proposal_sha256, approved_total_paise,
-        ruleset_version, gatekeeper_trace_digest, approval_source, provider_kind, receipt)
-     VALUES ($1,'PROPOSAL_APPROVED',$2,$3,$4,$5,$6,$7,$8,$9)
+        ruleset_version, gatekeeper_trace_digest, approval_source, provider_kind, receipt, agent_id)
+     VALUES ($1,'PROPOSAL_APPROVED',$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (tx_id) DO NOTHING
      RETURNING tx_id`,
     [
@@ -105,6 +116,7 @@ export async function settle(p: SettleableProposal, deps: SettleDeps): Promise<S
       p.approval_source,
       provider.kind,
       receiptFor(p.tx_id),
+      opts.ownerAgentId ?? null,
     ],
   );
   if ((inserted.rowCount ?? 0) === 0) {

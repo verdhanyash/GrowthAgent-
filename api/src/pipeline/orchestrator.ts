@@ -132,7 +132,12 @@ export async function runPipeline(deps: PipelineDeps, input: RunInput): Promise<
         patterns_matched: scanned.signal.hits.map((h) => h.pattern_id),
         matched_snippets: scanned.signal.hits.map((h) => h.snippet),
         severity: scanned.signal.risk_score >= 40 ? "HIGH" : scanned.signal.risk_score >= 20 ? "MEDIUM" : "LOW",
-        customer_note_full: input.customer_note_raw,
+        // The matched snippets already carry the forensic signal; the full note
+        // is durably persisted in proposal_txs.request_bytes. We publish only a
+        // bounded preview over SSE so a hostile note can't dump unbounded
+        // attacker-controlled text to every subscribed dashboard.
+        customer_note_preview: input.customer_note_raw.slice(0, 280),
+        customer_note_len: input.customer_note_raw.length,
         agent_identity_hash: input.agent.key_hash,
         velocity_counter_incremented: false,
       }, PIPELINE_ACTOR);
@@ -411,7 +416,7 @@ export async function resumeAfterApproval(
     ...(args.note !== undefined ? { note: args.note } : {}),
   }, systemActor("inbox", "SYSTEM"));
   await setStage(deps.db, row.tx_id, "SETTLING");
-  const ctx = new RunCtx(makePartialDeps(deps), fakeInputFor(row.tx_id));
+  const ctx = new RunCtx(makePartialDeps(deps), await resumeInputFor(deps.db, row.tx_id));
   const terminal = await ctx.settlement(row.frozen_proposal);
   await ctx.finishNonTerminal("SETTLING", terminalOutcomeJson(terminal));
   return { already: false, terminal };
@@ -519,7 +524,12 @@ class RunCtx {
         clock,
         ...(this.deps.reserveVelocity !== undefined ? { velocity: this.deps.reserveVelocity } : {}),
         consumeApprovalToken: makeApprovalTokenConsumer(db),
-      });
+        // Ownership stamp (E-11). An empty id is the resume path's "claim row
+        // vanished" fallback — omit it so the column stays NULL (owned by
+        // nobody) rather than storing a sentinel that could be presented.
+      }, this.input.agent.agent_id === ""
+        ? {}
+        : { ownerAgentId: this.input.agent.agent_id });
       await emitter.emit(this.input.tx_id, "settlement_step", {
         step: "STOCK_RESERVE", status: "SUCCEEDED", attempt: 1,
         amount_paise: result.response.amount_paise, currency: "INR",
@@ -635,10 +645,25 @@ function makePartialDeps(d: ResolveDeps): PipelineDeps {
   };
 }
 
-function fakeInputFor(txId: string): RunInput {
+/** Minimal RunInput for the resume path. The buyer's REAL identity is recovered
+ *  from the claim row (proposal_txs) rather than stubbed: `ctx.settlement` stamps
+ *  `transactions.agent_id` from it, so an escalation-approved tx must end up
+ *  owned by the buyer who submitted it — not by a sentinel that owns nothing and
+ *  would 404 for its own author on `GET /v1/tx/:tx_id`. */
+async function resumeInputFor(db: PgPool, txId: string): Promise<RunInput> {
+  const r = await db.query(
+    `SELECT agent_id, agent_key_hash FROM proposal_txs WHERE tx_id=$1`,
+    [txId],
+  );
+  const claim = r.rows[0] as { agent_id: string; agent_key_hash: string } | undefined;
   return {
     tx_id: txId,
-    agent: { agent_id: "resume", key_hash: "0".repeat(64) },
+    // A missing claim row is unreachable (the escalation implies a pipeline run)
+    // but must not crash the resume; NULL owner ⇒ owned by nobody, never by
+    // a guessable id.
+    agent: claim === undefined
+      ? { agent_id: "", key_hash: "0".repeat(64) }
+      : { agent_id: claim.agent_id, key_hash: claim.agent_key_hash },
     buyer_request: { items: [], channel: "AGENT" },
     customer_note_raw: "",
     merchant_id: "meeras-cakes",

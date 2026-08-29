@@ -28,6 +28,12 @@ import { settle } from "../settle.js";
 export const REDIS_PORT = 16_379; // docker-compose host port
 export const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford, no I/L/O/U
 
+/** The buyer agent every settlement HTTP test authenticates as. The routes now
+ *  require a valid key + enforce tx ownership; seeding one agent keeps the
+ *  matrix green (settle stamps this id as owner → the read route matches it). */
+export const SETTLE_BUYER_KEY = "gak_settle_test_key_0001";
+export const SETTLE_BUYER_AGENT_ID = "buyer_settle_test";
+
 let txCounter = 0;
 /** 'tx_' + 26-char Crockford ULID-shaped id, unique within the process. */
 export function newTxId(): string {
@@ -82,6 +88,39 @@ export async function seedStock(db: PgPool, stock: Record<string, number>): Prom
       [sku, qty],
     );
   }
+}
+
+/**
+ * Upsert an agent identity. `agent_identities` is NOT in truncateAll's list
+ * (identities are fixtures, not per-test state), so this is written to be
+ * idempotent AND to reset `revoked_at` — otherwise a revoked-key test would
+ * poison every later test that authenticates as the same agent.
+ */
+export async function seedAgent(
+  db: PgPool,
+  opts: { agentId: string; key: string; role?: "buyer_agent" | "system"; revoked?: boolean },
+): Promise<void> {
+  const revokedAt = opts.revoked === true ? new Date().toISOString() : null;
+  await db.query(
+    `INSERT INTO agent_identities (agent_id, display_name, role, api_key_hash, api_key_prefix, revoked_at, revoked_reason)
+     VALUES ($1,$1,$4,$2,$3,$5,$6)
+     ON CONFLICT (agent_id) DO UPDATE
+       SET api_key_hash=$2, role=$4, revoked_at=$5, revoked_reason=$6`,
+    [
+      opts.agentId,
+      sha256HexOf(opts.key),
+      opts.key.slice(0, 12),
+      opts.role ?? "buyer_agent",
+      revokedAt,
+      revokedAt === null ? null : "test fixture",
+    ],
+  );
+}
+
+/** Seed the buyer agent the HTTP settle tests authenticate as. Idempotent
+ *  (upsert) and NOT wiped by truncateAll, so one call per startSystem holds. */
+export async function seedSettlementAgent(db: PgPool): Promise<void> {
+  await seedAgent(db, { agentId: SETTLE_BUYER_AGENT_ID, key: SETTLE_BUYER_KEY, role: "buyer_agent" });
 }
 
 /** Minimal transactions row for reserve-layer-only tests (FK target). */
@@ -146,6 +185,7 @@ export async function startSystem(): Promise<TestSystem> {
   const db = createPool();
   await db.query("SELECT 1"); // fail fast if compose stack is down
   await applyMigrations(db);
+  await seedSettlementAgent(db); // buyer agent for the authenticated settle routes
   const redis = new Redis({ port: REDIS_PORT, lazyConnect: false, maxRetriesPerRequest: 20 });
   await redis.ping();
 

@@ -19,6 +19,11 @@ import {
   startSystem,
   truncateAll,
   waitForTxState,
+  ensureTxRow,
+  newTxId,
+  seedAgent,
+  SETTLE_BUYER_KEY,
+  SETTLE_BUYER_AGENT_ID,
   type ProposalOverrides,
   type TestSystem,
 } from "./__tests__/harness.js";
@@ -39,15 +44,30 @@ afterEach(async () => {
 
 /* ------------------------------ helpers -------------------------------- */
 
+/** Both buyer routes require a buyer-agent key; the harness seeds this one and
+ *  `settle()` stamps it as the tx owner, so the read route's ownership check
+ *  matches. `agentKey` is overridable so the auth tests can present a bad key. */
 function postSettle(
   proposal: ReturnType<typeof makeProposal>,
   key = crypto.randomUUID(),
+  agentKey: string | null = SETTLE_BUYER_KEY,
 ): Promise<Response> {
   return fetch(`${sys.baseUrl()}/v1/tx/settle`, {
     method: "POST",
-    headers: { "content-type": "application/json", "idempotency-key": key },
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": key,
+      ...(agentKey === null ? {} : { "x-agent-key": agentKey }),
+    },
     // SettleRequest carries the key in the BODY too (schema-enforced UUID).
     body: JSON.stringify({ idempotency_key: key, proposal }),
+  });
+}
+
+/** Authenticated GET of the buyer read route. */
+function getTx(txId: string, agentKey: string | null = SETTLE_BUYER_KEY): Promise<Response> {
+  return fetch(`${sys.baseUrl()}/v1/tx/${txId}`, {
+    headers: agentKey === null ? {} : { "x-agent-key": agentKey },
   });
 }
 
@@ -123,7 +143,7 @@ describe("happy path (§12)", () => {
     expect(sales.rows[0].n).toBe(1);
     expect(sys.sink.count(body.tx_id, "tx.paid")).toBe(1);
 
-    const read = await fetch(`${sys.baseUrl()}/v1/tx/${body.tx_id}`);
+    const read = await getTx(body.tx_id);
     expect(read.status).toBe(200);
     const view = (await read.json()) as { state: string; pay_id: string | null };
     expect(view.state).toBe("COMPLETED");
@@ -131,7 +151,7 @@ describe("happy path (§12)", () => {
   });
 
   it("GET unknown tx → 404 TX_NOT_FOUND", async () => {
-    const r = await fetch(`${sys.baseUrl()}/v1/tx/${"tx_0000000000000000AAAAAAAA"}`);
+    const r = await getTx("tx_0000000000000000AAAAAAAA");
     expect(r.status).toBe(404);
     expect(await r.json()).toMatchObject({ code: "TX_NOT_FOUND" });
   });
@@ -403,5 +423,77 @@ describe("late-capture grace ladder (§10.3)", () => {
     expect(sys.sink.count(txId, "human_review_enqueued")).toBe(1);
     const sales = await sys.db.query(`SELECT count(*)::int n FROM completed_sales`);
     expect(sales.rows[0].n).toBe(0);
+  });
+});
+
+/* --------------- auth + ownership (security-audit P2-full) --------------- */
+
+const OTHER_BUYER_KEY = "gak_settle_test_other_0002";
+const REVOKED_KEY = "gak_settle_test_revoked_0003";
+const SYSTEM_KEY = "gak_settle_test_system_0004";
+
+describe("buyer-route auth + tx ownership", () => {
+  it("no key → 401 UNAUTHORIZED, and the idempotency key survives for a real retry", async () => {
+    await seedStock(sys.db, { "SKU-A": 5 });
+    const key = crypto.randomUUID();
+    const anon = await postSettle(cart(), key, null);
+    expect(anon.status).toBe(401);
+    expect(await anon.json()).toMatchObject({ code: "UNAUTHORIZED" });
+    // auth mounts BEFORE the idempotency gate, so a rejected request never
+    // reserved the key — the same key must still settle cleanly (§8.1).
+    const real = await postSettle(cart(), key);
+    expect(real.status).toBe(201);
+  });
+
+  it("unrecognized key → 401; revoked key → 401 AGENT_KEY_REVOKED", async () => {
+    const bogus = await postSettle(cart(), crypto.randomUUID(), "gak_not_a_real_key");
+    expect(bogus.status).toBe(401);
+    expect(await bogus.json()).toMatchObject({ code: "UNAUTHORIZED" });
+
+    await seedAgent(sys.db, { agentId: "buyer_settle_revoked", key: REVOKED_KEY, revoked: true });
+    const revoked = await postSettle(cart(), crypto.randomUUID(), REVOKED_KEY);
+    expect(revoked.status).toBe(401);
+    expect(await revoked.json()).toMatchObject({ code: "AGENT_KEY_REVOKED" });
+  });
+
+  it("authenticated but wrong role (system) → 403 FORBIDDEN", async () => {
+    await seedAgent(sys.db, { agentId: "system_settle_test", key: SYSTEM_KEY, role: "system" });
+    const r = await postSettle(cart(), crypto.randomUUID(), SYSTEM_KEY);
+    expect(r.status).toBe(403);
+    expect(await r.json()).toMatchObject({ code: "FORBIDDEN" });
+    const g = await getTx("tx_0000000000000000AAAAAAAA", SYSTEM_KEY);
+    expect(g.status).toBe(403);
+  });
+});
+
+describe("tx ownership on the read route", () => {
+  it("settle stamps the authenticated caller as owner", async () => {
+    await seedStock(sys.db, { "SKU-A": 5 });
+    const res = await postSettle(cart());
+    expect(res.status).toBe(201);
+    const { tx_id } = (await res.json()) as { tx_id: string };
+    const row = await sys.db.query(`SELECT agent_id FROM transactions WHERE tx_id=$1`, [tx_id]);
+    expect(row.rows[0].agent_id).toBe(SETTLE_BUYER_AGENT_ID);
+    expect((await getTx(tx_id)).status).toBe(200); // owner reads it
+  });
+
+  it("another agent's tx → 404, byte-identical to an unknown tx (no existence oracle)", async () => {
+    await seedStock(sys.db, { "SKU-A": 5 });
+    const res = await postSettle(cart());
+    const { tx_id } = (await res.json()) as { tx_id: string };
+
+    await seedAgent(sys.db, { agentId: "buyer_settle_other", key: OTHER_BUYER_KEY });
+    const stranger = await getTx(tx_id, OTHER_BUYER_KEY);
+    const unknown = await getTx("tx_0000000000000000AAAAAAAA", OTHER_BUYER_KEY);
+    expect(stranger.status).toBe(404);
+    expect(await stranger.json()).toEqual(await unknown.json());
+  });
+
+  it("NULL-owner tx (pre-V11 / unattributable writer) → 404 for every caller", async () => {
+    const txId = newTxId();
+    await ensureTxRow(sys.db, txId); // writes no agent_id
+    const owned = await sys.db.query(`SELECT agent_id FROM transactions WHERE tx_id=$1`, [txId]);
+    expect(owned.rows[0].agent_id).toBeNull();
+    expect((await getTx(txId)).status).toBe(404);
   });
 });

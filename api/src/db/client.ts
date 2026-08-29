@@ -33,13 +33,32 @@ async function ensureRegistry(db: PgPool | PgClient): Promise<void> {
   );
 }
 
-/** Apply every not-yet-applied V*.sql in filename order, one transaction each. */
+/** Numeric version embedded in a "V<n>__*.sql" name (the regex guarantees it). */
+function migrationVersion(file: string): number {
+  return Number(/^V(\d+)__/.exec(file)![1]);
+}
+
+/**
+ * Filter to migration filenames and order them by VERSION, not lexicographically
+ * — a plain string sort places "V10__" before "V7__" (‘1’ < ‘7’) and, on a fresh
+ * DB, runs V10 before the migrations it depends on. Exported so the ordering
+ * itself is testable without a live database (every caller of `applyMigrations`
+ * runs against an already-migrated dev DB, where the registry short-circuits
+ * every file and ordering bugs stay invisible).
+ */
+export function sortMigrationFiles(files: readonly string[]): string[] {
+  return files
+    .filter((f) => MIGRATION_NAME_RE.test(f))
+    .sort((a, b) => migrationVersion(a) - migrationVersion(b) || a.localeCompare(b));
+}
+
+/** Apply every not-yet-applied V*.sql in VERSION order, one transaction each. */
 export async function applyMigrations(
   db: PgPool,
   dir = join(process.cwd(), "migrations"),
 ): Promise<string[]> {
   await ensureRegistry(db);
-  const files = (await readdir(dir)).filter((f) => MIGRATION_NAME_RE.test(f)).sort();
+  const files = sortMigrationFiles(await readdir(dir));
   const applied: string[] = [];
   for (const file of files) {
     const seen = await db.query("SELECT 1 FROM schema_migrations WHERE name = $1", [file]);
