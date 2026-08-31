@@ -12,14 +12,16 @@
  * pack contains") holds over exactly these entries.
  */
 import {
-  allocateIds,
-  packHash,
   type CampaignPriorityPayload,
   type CatalogItemGroundTruth,
   type EvidencePackContainer,
   type GroundTruthSnapshot,
 } from "@growthagent/shared";
-import type { EvidencePackEntryInput } from "@growthagent/shared";
+import {
+  allocateIds,
+  packHash,
+  type EvidencePackEntryInput,
+} from "@growthagent/shared/evidence";
 
 /** Optional enrichment rows keyed by sku (catalog-intelligence output). */
 export type EnrichmentIndex = ReadonlyMap<

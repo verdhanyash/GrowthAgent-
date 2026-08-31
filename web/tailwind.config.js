@@ -12,9 +12,10 @@ export default {
         ink: "#e2e8f0", // primary text
         mute: "#64748b", // secondary text
         accent: "#22d3ee", // cyan — running/live highlights
-        ok: "#34d399", // PASS green
+        ok: "#34d399", // PASS / APPROVE green
         warn: "#fbbf24", // BAND amber
-        bad: "#f87171", // FAIL/injection red
+        bad: "#f87171", // FAIL / DECLINE / injection red
+        escalate: "#c084fc", // ESCALATE / awaiting-human violet
       },
       fontFamily: {
         mono: [

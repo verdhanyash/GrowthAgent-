@@ -12,7 +12,7 @@ import {
   PackInvariantViolationError,
   packHash,
   type EvidencePackEntryInput,
-} from "../index.js";
+} from "../evidence/ids.js";
 import { ENTRY, testPack, VAN } from "./pack-fixture.js";
 
 /* ------------------------------------------------------------- golden ids */

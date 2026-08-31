@@ -30,14 +30,10 @@ export {
   type NumericFact,
 } from "./evidence/facts.js";
 
-/* deterministic evidence-ID allocation + pack hashing (negotiation.md §1.4) */
-export {
-  allocateIds,
-  KIND_ORDER,
-  packHash,
-  PackInvariantViolationError,
-  type EvidencePackEntryInput,
-} from "./evidence/ids.js";
+/* deterministic evidence-ID allocation + pack hashing (negotiation.md §1.4).
+ * NODE-ONLY: packHash uses node:crypto, so this lives behind the
+ * "@growthagent/shared/evidence" subpath instead of the main barrel — keeping
+ * the barrel browser-safe (the web bundle must never pull in node:crypto). */
 
 /* negotiation stage contracts (negotiation.md §3.3/§4) */
 export {

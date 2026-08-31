@@ -3,10 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./evidence": {
+      "types": "./dist/evidence/ids.d.ts",
+      "default": "./dist/evidence/ids.js"
     }
   },
   "scripts": {

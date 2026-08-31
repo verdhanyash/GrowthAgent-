@@ -199,29 +199,198 @@ const RulesVersionUpdatedZ = z.object({
   changed_fields: z.array(z.string()),
 });
 
-/* Payloads owned by later modules (M2+); names pinned now so the taxonomy,
- * envelope typing and parseFrame dispatch stay stable. Their owning module
- * specs refine these in place. */
-const PlaceholderZ = z.unknown();
+/* ------------------------------------------------------------------------
+ * Payloads that earlier milestones (M2–M7) pinned as PlaceholderZ. They are
+ * now completed to mirror the EXACT objects the pipeline orchestrator emits
+ * at each stage (verified field-by-field against
+ * api/src/pipeline/orchestrator.ts). Design goals, in priority order:
+ *
+ *  1. validate-on-write must NEVER regress. The emitter calls
+ *     EVENT_SCHEMAS[event].parse(payload) and THROWS on failure (failing the
+ *     stage). So these use plain z.object (NOT .strict) — extra/future keys
+ *     are tolerated — and every value type is permissive (enum-ish fields are
+ *     z.string(), not z.enum(...)) so a legitimate emit can never be rejected.
+ *  2. emit()'s compile-time type (EventPayloadMap[K]) must still accept the
+ *     orchestrator's emit-site object literals: each schema declares exactly
+ *     the top-level keys the emitter composes, marking conditionally-emitted
+ *     keys .optional(), so there is no excess-property or missing-key error.
+ *  3. The browser gets real payload types instead of `unknown`.
+ *
+ * Sub-objects owned by other builders (the evidence pack, the zod/v4
+ * NegotiationProposal — which cannot be nested inside this zod v3 module) are
+ * kept loose (.passthrough() / z.unknown()) so a richer legit payload passes.
+ */
+
+// evidence_pack_built — { pack: EvidencePackContainer } (see pipeline/evidence.ts)
+const EvidencePackWireEntryZ = z
+  .object({
+    id: z.string(),
+    kind: z.string(),
+    sku: z.string().nullable().optional(),
+    payload: z.unknown(),
+    source_table: z.string().optional(),
+    computed_at: z.string().optional(),
+  })
+  .passthrough();
+const EvidencePackBuiltZ = z.object({
+  pack: z
+    .object({
+      pack_hash: z.string(),
+      built_at: z.string(),
+      sim_today: z.string(),
+      merchant_id: z.string(),
+      entries: z.array(EvidencePackWireEntryZ),
+    })
+    .passthrough(),
+});
+
+// campaign_priority_injected
+const CampaignPriorityInjectedZ = z.object({
+  priority_set_id: z.string(),
+  generated_at: z.string(),
+  degraded: z.boolean(),
+  priorities: z.array(
+    z
+      .object({
+        priority_id: z.string(),
+        action: z.string(),
+        target_skus: z.array(z.string()),
+        weight: z.number().int(),
+        rationale_plain_language: z.string(),
+      })
+      .passthrough(),
+  ),
+});
+
+// proposal_ready — proposal is the zod/v4 NegotiationProposal; mirrored loosely
+// (a v4 schema cannot be nested inside this v3 module).
+const ProposalWireZ = z
+  .object({
+    proposed_items: z.array(z.unknown()).optional(),
+    bundle_discount_pct: z.number().optional(),
+    claims: z.array(z.unknown()).optional(),
+    customer_pitch: z.string().optional(),
+    upsell_reasoning_summary: z.string().optional(),
+    used_campaign_priority: z.boolean().optional(),
+    campaign_priority_ids: z.array(z.string()).optional(),
+  })
+  .passthrough();
+const ProposalReadyZ = z.object({
+  proposal: ProposalWireZ,
+  generator: z.string(),
+  is_fallback: z.boolean(),
+  degraded: z.boolean(),
+  latency_ms: z.number().int().nonnegative(),
+});
+
+// citation_audit_result — the reduced SSE projection (NOT the full
+// negotiation/audit.ts CitationAuditResult) the orchestrator emits.
+const CitationAuditResultZ = z.object({
+  auditor: z.string(),
+  verdict: z.string(),
+  checked_claims: z.number().int().nonnegative(),
+  violation_count: z.number().int().nonnegative(),
+  violations: z.array(
+    z
+      .object({
+        claim_index: z.number().int().nullable().optional(),
+        code: z.string(),
+        detail: z.string(),
+      })
+      .passthrough(),
+  ),
+  proposal_accepted_into_pipeline: z.boolean(),
+});
+
+// settlement_step — only STOCK_RESERVE / RAZORPAY_ORDER_CREATE / PAYMENT_AWAIT
+// (+ failures) are emitted today; step/status kept as strings for forward steps.
+const SettlementStepZ = z.object({
+  step: z.string(),
+  status: z.string(),
+  attempt: z.number().int().positive(),
+  provider_mode: z.string().optional(),
+  amount_paise: z.number().int().optional(),
+  currency: z.string().optional(),
+  razorpay_order_id: z.string().optional(),
+  error_code: z.string().optional(),
+});
+
+// webhook_received — NOT currently emitted by the pipeline; schema pinned for
+// forward-compat so the taxonomy/parseFrame dispatch stays stable.
+const WebhookReceivedZ = z
+  .object({
+    provider: z.string().optional(),
+    event_type: z.string().optional(),
+    razorpay_order_id: z.string().optional(),
+    status: z.string().optional(),
+    verified: z.boolean().optional(),
+  })
+  .passthrough();
+
+// escalation_created
+const EscalationCreatedZ = z.object({
+  escalation_id: z.string(),
+  reason_codes: z.array(z.string()),
+  expires_at: z.string(),
+  proposed_cart: z
+    .object({
+      lines: z.array(z.unknown()),
+      subtotal_paise: z.number().int(),
+      discount_percent_bps: z.number().int(),
+      discount_paise: z.number().int(),
+      total_paise: z.number().int(),
+    })
+    .passthrough(),
+  rule_trace_ref: z
+    .object({ run_id: z.string(), trace_digest: z.string() })
+    .passthrough(),
+});
+
+// escalation_approved / escalation_rejected (shared resolved shape)
+const EscalationResolvedZ = z.object({
+  escalation_id: z.string(),
+  decision: z.string(),
+  decided_by: z.string(),
+  decided_at: z.string(),
+  note: z.string().optional(),
+});
+
+// explanation_narrative — mirrors explainer/schema.ts ExplanationNarrativeSchema.
+const ExplanationNarrativeZ = z.object({
+  audience: z.string(),
+  title: z.string(),
+  body_md: z.string(),
+  non_authoritative: z.literal(true),
+  grounded_on_events: z.array(z.number().int()),
+  degraded: z.boolean(),
+});
+
+// degraded — one per stage that fell back to a deterministic path.
+const DegradedZ = z.object({
+  stage: z.string(),
+  cause: z.string(),
+  fallback_engaged: z.string(),
+  chaos_forced: z.boolean(),
+});
 
 export const EVENT_SCHEMAS = {
   stage_started: StageStartedZ,
   stage_completed: StageCompletedZ,
-  evidence_pack_built: PlaceholderZ,
-  campaign_priority_injected: PlaceholderZ,
+  evidence_pack_built: EvidencePackBuiltZ,
+  campaign_priority_injected: CampaignPriorityInjectedZ,
   negotiation_token: NegotiationTokenZ,
   negotiation_snapshot: NegotiationSnapshotZ,
-  proposal_ready: PlaceholderZ,
-  citation_audit_result: PlaceholderZ,
+  proposal_ready: ProposalReadyZ,
+  citation_audit_result: CitationAuditResultZ,
   gatekeeper_rule_result: GatekeeperRuleResultZ,
   gatekeeper_decision: GatekeeperDecisionZ,
-  settlement_step: PlaceholderZ,
-  webhook_received: PlaceholderZ,
-  escalation_created: PlaceholderZ,
-  escalation_approved: PlaceholderZ,
-  escalation_rejected: PlaceholderZ,
-  explanation_narrative: PlaceholderZ,
-  degraded: PlaceholderZ,
+  settlement_step: SettlementStepZ,
+  webhook_received: WebhookReceivedZ,
+  escalation_created: EscalationCreatedZ,
+  escalation_approved: EscalationResolvedZ,
+  escalation_rejected: EscalationResolvedZ,
+  explanation_narrative: ExplanationNarrativeZ,
+  degraded: DegradedZ,
   injection_flagged: InjectionFlaggedZ,
   error: ErrorEventZ,
   heartbeat: HeartbeatZ,
@@ -229,24 +398,8 @@ export const EVENT_SCHEMAS = {
 } as const satisfies Record<EventName, z.ZodTypeAny>;
 
 export type EventPayloadMap = {
-  [K in EventName]: K extends keyof typeof TYPED_PAYLOADS
-    ? z.infer<(typeof TYPED_PAYLOADS)[K]>
-    : unknown;
+  [K in EventName]: z.infer<(typeof EVENT_SCHEMAS)[K]>;
 };
-
-/** Subset of payloads fully specified for M1. */
-export const TYPED_PAYLOADS = {
-  stage_started: StageStartedZ,
-  stage_completed: StageCompletedZ,
-  negotiation_token: NegotiationTokenZ,
-  negotiation_snapshot: NegotiationSnapshotZ,
-  heartbeat: HeartbeatZ,
-  gatekeeper_rule_result: GatekeeperRuleResultZ,
-  gatekeeper_decision: GatekeeperDecisionZ,
-  injection_flagged: InjectionFlaggedZ,
-  error: ErrorEventZ,
-  rules_version_updated: RulesVersionUpdatedZ,
-} as const;
 
 export type AnyEnvelope = { [K in EventName]: AuditEnvelope<K> }[EventName];
 

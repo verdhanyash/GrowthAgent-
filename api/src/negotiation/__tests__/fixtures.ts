@@ -4,12 +4,14 @@
  * tests only need a handful of entries.
  */
 import {
-  allocateIds,
-  packHash,
   type CampaignPriorityPayload,
   type EvidencePackContainer,
-  type EvidencePackEntryInput,
 } from "@growthagent/shared";
+import {
+  allocateIds,
+  packHash,
+  type EvidencePackEntryInput,
+} from "@growthagent/shared/evidence";
 import type { BuyerRequestView, NegotiationStageInput } from "@growthagent/shared";
 import type { NegotiationProposal } from "@growthagent/shared";
 import type { TransportResult } from "../transport.types.js";

@@ -14,12 +14,12 @@
  *   E009 PAIRING CHOC           pairs_with [CAKE-VAN-500]
  *   E010 CAMPAIGN_PRIORITY PRI-BDAY-BASH advertised 10%
  */
+import { type EvidencePackContainer } from "../index.js";
 import {
   allocateIds,
   packHash,
-  type EvidencePackContainer,
   type EvidencePackEntryInput,
-} from "../index.js";
+} from "../evidence/ids.js";
 
 export const CHOC = "CAKE-CHOC-500";
 export const VAN = "CAKE-VAN-500";

@@ -4,13 +4,15 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  allocateIds,
   canonicalJson,
-  packHash,
   type CampaignPriorityPayload,
   type EvidencePackContainer,
-  type EvidencePackEntryInput,
 } from "@growthagent/shared";
+import {
+  allocateIds,
+  packHash,
+  type EvidencePackEntryInput,
+} from "@growthagent/shared/evidence";
 import { FALLBACK_DEFAULT_PCT, buildFallbackBundle } from "../fallback.js";
 import { CHOC, ENTRY, NOW_ISO, VAN, mkPack, BDAY_PRIORITY } from "./fixtures.js";
 
