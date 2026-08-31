@@ -24,6 +24,7 @@ import { requireAgent } from "./auth.js";
 import { rateLimit } from "./rate-limit.js";
 import { proposalRoutes } from "./proposals.route.js";
 import { streamRoutes } from "./stream.route.js";
+import { adminRoutes } from "./admin-mount.js";
 
 export interface ApiAppDeps {
   readonly db: PgPool;
@@ -35,6 +36,10 @@ export interface ApiAppDeps {
   readonly buildMandate: (txId: string) => Promise<CartMandate | null>;
   readonly ticketSecret: string;
   readonly merchantId?: string | undefined;
+  /** Admin/demo control plane (§4.3 guard). Mounted behind the loopback +
+   *  X-Admin-Token guard at the /v1/admin and /v1/demo prefixes. */
+  readonly adminToken?: string | undefined;
+  readonly allowInsecureAdmin?: boolean | undefined;
   /** Pre-built webhook router (raw parser); omitted in focused HTTP tests. */
   readonly webhook?: Router | undefined;
   readonly heartbeatMs?: number | undefined;
@@ -85,6 +90,15 @@ export function buildApiApp(deps: ApiAppDeps): Express {
       ticketSecret: deps.ticketSecret,
       heartbeatMs: deps.heartbeatMs,
       terminalPollMs: deps.terminalPollMs,
+    }),
+  );
+
+  // Admin/demo control plane — guard scoped to /v1/admin + /v1/demo inside.
+  app.use(
+    adminRoutes({
+      db: deps.db,
+      adminToken: deps.adminToken,
+      allowInsecureAdmin: deps.allowInsecureAdmin,
     }),
   );
 

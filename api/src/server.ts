@@ -29,6 +29,7 @@ import { LiveNimTransport } from "./negotiation/transport.nim.live.js";
 import type { NegotiationTransport } from "./negotiation/transport.types.js";
 import { buildApiApp } from "./http/app.js";
 import { buildCartMandate, DEFAULT_MANDATE_TTL_MS, DEV_MERCHANT_SIGNING_SECRET } from "./http/mandate-builder.js";
+import { resolveAllowInsecure } from "./http/admin-guard.js";
 
 const PORT = Number(process.env.API_PORT ?? 3000);
 const RULES_VERSION = 3; // matches the emitter/audit rules_version stamped this build
@@ -126,6 +127,10 @@ export async function buildServer(): Promise<ApiServer> {
     buildMandate: (txId: string) =>
       buildCartMandate({ db: pool, groundTruth: async () => MEERA_GT_V1, nowMs: () => clock.nowMs(), signingSecret }, txId),
     ticketSecret,
+    // Admin/demo control plane (§4.3). ADMIN_TOKEN gates loopback callers; the
+    // insecure hatch is forced OFF in production by resolveAllowInsecure().
+    adminToken: process.env.ADMIN_TOKEN,
+    allowInsecureAdmin: resolveAllowInsecure(),
   });
 
   return {

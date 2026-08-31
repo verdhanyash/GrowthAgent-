@@ -18,6 +18,7 @@ export const ErrorCode = z.enum([
   "FORBIDDEN", // 403 authenticated, wrong role/route
   "TX_NOT_FOUND", // 404 unknown tx OR tx belonging to another agent (no existence leak)
   "APPROVAL_NOT_FOUND", // 404
+  "AGENT_NOT_FOUND", // 404 revoke targeted an unknown agent_id (admin, loopback-only — no existence-leak concern)
   "SCENARIO_NOT_FOUND", // 404 unknown :name
   "IDEMPOTENCY_CONFLICT", // 409 same key, different request hash
   "APPROVAL_ALREADY_RESOLVED", // 409 second resolve attempt loses the race

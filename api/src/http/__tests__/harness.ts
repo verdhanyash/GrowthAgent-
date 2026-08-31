@@ -26,6 +26,7 @@ import { sha256Hex } from "../crypto.js";
 
 export const TICKET_SECRET = "ga-stream-ticket-secret-test";
 export const RULES_VERSION = 3;
+export const ADMIN_TOKEN = "ga-admin-token-test";
 
 export const BUYER_KEY = "gak_buyer_test_key_0001";
 export const BUYER_AGENT_ID = "buyer_test";
@@ -125,6 +126,11 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
         txId,
       ),
     ticketSecret: TICKET_SECRET,
+    // Admin/demo control plane: enforce the real §4.3 matrix in tests (token
+    // required, insecure hatch OFF) — the harness listens on loopback so the
+    // IP check passes and only the X-Admin-Token gate is exercised.
+    adminToken: ADMIN_TOKEN,
+    allowInsecureAdmin: false,
     heartbeatMs: overrides.heartbeatMs,
     terminalPollMs: overrides.terminalPollMs ?? 100,
   });
@@ -199,4 +205,33 @@ export function proposalBody(idempotencyKey: string, note = "Please put together
     },
     untrusted: { customer_note: note },
   };
+}
+
+/** Admin GET with an (optional) X-Admin-Token. Omit `token` to send none. */
+export async function adminGet(
+  base: string,
+  path: string,
+  token: string | null = ADMIN_TOKEN,
+): Promise<{ status: number; json: any }> {
+  const headers: Record<string, string> = {};
+  if (token !== null) headers["X-Admin-Token"] = token;
+  const res = await fetch(`${base}${path}`, { headers });
+  return { status: res.status, json: await res.json() };
+}
+
+/** Admin POST with a JSON body and an (optional) X-Admin-Token. */
+export async function adminPost(
+  base: string,
+  path: string,
+  body: unknown = {},
+  token: string | null = ADMIN_TOKEN,
+): Promise<{ status: number; json: any }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token !== null) headers["X-Admin-Token"] = token;
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, json: await res.json() };
 }
