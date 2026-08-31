@@ -21,7 +21,7 @@ import { applyMigrations, createPool, type PgPool } from "./db/client.js";
 import { AuditChain } from "./pipeline/audit-chain.js";
 import { TraceBus } from "./pipeline/bus.js";
 import { PipelineEmitter } from "./pipeline/emitter.js";
-import { runPipeline, type PipelineDeps, type RunInput } from "./pipeline/orchestrator.js";
+import { runPipeline, resumeAfterApproval, rejectAfterRejection, type PipelineDeps, type RunInput, type ResolveDeps } from "./pipeline/orchestrator.js";
 import { SystemClock } from "./settlement/clock.js";
 import { loadSettlementConfig } from "./settlement/config.js";
 import { MockProvider } from "./settlement/provider/mock.provider.js";
@@ -111,6 +111,9 @@ export async function buildServer(): Promise<ApiServer> {
   const signingSecret = resolveSigningSecret("MERCHANT_SIGNING_SECRET", DEV_MERCHANT_SIGNING_SECRET);
   const ticketSecret = resolveSigningSecret("STREAM_TICKET_SECRET", DEV_TICKET_SECRET);
 
+  // Detached escalation resolvers for the approvals inbox (§7.2).
+  const resolveDeps: ResolveDeps = { db: pool, clock, chain, emitter, provider, settleConfig };
+
   const app = buildApiApp({
     db: pool,
     bus,
@@ -131,6 +134,16 @@ export async function buildServer(): Promise<ApiServer> {
     // insecure hatch is forced OFF in production by resolveAllowInsecure().
     adminToken: process.env.ADMIN_TOKEN,
     allowInsecureAdmin: resolveAllowInsecure(),
+    resumeApproval: (a) => {
+      void resumeAfterApproval(resolveDeps, a).catch((err) => {
+        console.error(`[api] approval resume failed for ${a.approval_id}:`, err instanceof Error ? err.stack ?? err.message : String(err));
+      });
+    },
+    rejectApproval: (a) => {
+      void rejectAfterRejection(resolveDeps, a).catch((err) => {
+        console.error(`[api] approval reject failed for ${a.approval_id}:`, err instanceof Error ? err.stack ?? err.message : String(err));
+      });
+    },
   });
 
   return {

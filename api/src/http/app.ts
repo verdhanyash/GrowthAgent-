@@ -40,6 +40,10 @@ export interface ApiAppDeps {
    *  X-Admin-Token guard at the /v1/admin and /v1/demo prefixes. */
   readonly adminToken?: string | undefined;
   readonly allowInsecureAdmin?: boolean | undefined;
+  /** Detached escalation resolvers for the approvals inbox (§7.2). Built in
+   *  server.ts/harness from resumeAfterApproval/rejectAfterRejection. */
+  readonly resumeApproval?: ((a: { approval_id: string; decided_by: string; note?: string | undefined }) => void) | undefined;
+  readonly rejectApproval?: ((a: { approval_id: string; decided_by: string; note?: string | undefined }) => void) | undefined;
   /** Pre-built webhook router (raw parser); omitted in focused HTTP tests. */
   readonly webhook?: Router | undefined;
   readonly heartbeatMs?: number | undefined;
@@ -94,11 +98,17 @@ export function buildApiApp(deps: ApiAppDeps): Express {
   );
 
   // Admin/demo control plane — guard scoped to /v1/admin + /v1/demo inside.
+  const noResolver = (what: string) => () => {
+    console.error(`[api] ${what} invoked but no resolver was wired into buildApiApp`);
+  };
   app.use(
     adminRoutes({
       db: deps.db,
       adminToken: deps.adminToken,
       allowInsecureAdmin: deps.allowInsecureAdmin,
+      rulesVersion: deps.rulesVersion,
+      resumeApproval: deps.resumeApproval ?? noResolver("resumeApproval"),
+      rejectApproval: deps.rejectApproval ?? noResolver("rejectApproval"),
     }),
   );
 

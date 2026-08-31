@@ -15,7 +15,7 @@ import { applyMigrations, createPool, type PgPool } from "../../db/client.js";
 import { AuditChain } from "../../pipeline/audit-chain.js";
 import { TraceBus } from "../../pipeline/bus.js";
 import { PipelineEmitter } from "../../pipeline/emitter.js";
-import { runPipeline, type PipelineDeps, type RunInput } from "../../pipeline/orchestrator.js";
+import { runPipeline, resumeAfterApproval, rejectAfterRejection, type PipelineDeps, type RunInput, type ResolveDeps } from "../../pipeline/orchestrator.js";
 import { SystemClock } from "../../settlement/clock.js";
 import { loadSettlementConfig } from "../../settlement/config.js";
 import { MockProvider } from "../../settlement/provider/mock.provider.js";
@@ -109,6 +109,8 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
     approvalTtlMs: 60_000,
   };
 
+  const resolveDeps: ResolveDeps = { db, clock, chain, emitter, provider, settleConfig };
+
   const app = buildApiApp({
     db,
     bus,
@@ -131,6 +133,16 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
     // IP check passes and only the X-Admin-Token gate is exercised.
     adminToken: ADMIN_TOKEN,
     allowInsecureAdmin: false,
+    resumeApproval: (a) => {
+      void resumeAfterApproval(resolveDeps, a).catch((err) =>
+        console.error(`[test-api] resume failed for ${a.approval_id}:`, err instanceof Error ? err.message : err),
+      );
+    },
+    rejectApproval: (a) => {
+      void rejectAfterRejection(resolveDeps, a).catch((err) =>
+        console.error(`[test-api] reject failed for ${a.approval_id}:`, err instanceof Error ? err.message : err),
+      );
+    },
     heartbeatMs: overrides.heartbeatMs,
     terminalPollMs: overrides.terminalPollMs ?? 100,
   });

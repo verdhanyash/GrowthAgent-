@@ -12,6 +12,7 @@ import express, { type Router } from "express";
 import type { PgPool } from "../db/client.js";
 import { requireAdmin } from "./admin-guard.js";
 import { adminAgentRoutes } from "./admin-agents.route.js";
+import { adminApprovalRoutes, type AdminApprovalRoutesDeps } from "./admin-approvals.route.js";
 
 export interface AdminMountDeps {
   readonly db: PgPool;
@@ -21,6 +22,11 @@ export interface AdminMountDeps {
   readonly allowInsecureAdmin?: boolean | undefined;
   /** Injectable warn sink (tests). */
   readonly warn?: ((msg: string) => void) | undefined;
+  /** Current merchant rules_version (approvals drift guard). */
+  readonly rulesVersion: () => number;
+  /** Detached escalation resolvers (built in the composition root). */
+  readonly resumeApproval: AdminApprovalRoutesDeps["resumeApproval"];
+  readonly rejectApproval: AdminApprovalRoutesDeps["rejectApproval"];
 }
 
 export function adminRoutes(deps: AdminMountDeps): Router {
@@ -36,6 +42,14 @@ export function adminRoutes(deps: AdminMountDeps): Router {
 
   // Sub-groups (append as each lands).
   router.use(adminAgentRoutes({ db: deps.db }));
+  router.use(
+    adminApprovalRoutes({
+      db: deps.db,
+      rulesVersion: deps.rulesVersion,
+      resumeApproval: deps.resumeApproval,
+      rejectApproval: deps.rejectApproval,
+    }),
+  );
 
   return router;
 }
