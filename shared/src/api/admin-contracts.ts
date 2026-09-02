@@ -213,3 +213,173 @@ export const DemoResetResponseSchema = z
   })
   .strict();
 export type DemoResetResponse = z.infer<typeof DemoResetResponseSchema>;
+
+/* --------------------------- §7.5 analytics ------------------------------
+ * Read-only aggregates over the tables the pipeline already writes:
+ * proposal_txs (outcome + timing), audit_log (rule verdicts, stage durations,
+ * injection/degradation events), transactions + completed_sales (money), and
+ * approvals (human-review latency). NOTHING here is synthesised — an empty
+ * database yields zeroes and empty arrays, never placeholder shapes.
+ */
+
+/** Time window the dashboard scopes every figure to. */
+export const AnalyticsWindowSchema = z.enum(["24h", "7d", "30d"]);
+export type AnalyticsWindow = z.infer<typeof AnalyticsWindowSchema>;
+
+/** The four terminal outcomes, as a chart-friendly flat enum. */
+export const OutcomeKindSchema = z.enum(["APPROVED", "ESCALATED", "DECLINED", "FAILED"]);
+export type OutcomeKind = z.infer<typeof OutcomeKindSchema>;
+
+export const AnalyticsTotalsSchema = z
+  .object({
+    proposals: z.number().int().nonnegative(),
+    approved: z.number().int().nonnegative(),
+    escalated: z.number().int().nonnegative(),
+    declined: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    in_flight: z.number().int().nonnegative(),
+    /** approved / (approved+escalated+declined+failed); null when nothing decided. */
+    approval_rate_pct: z.number().nullable(),
+    /** created_at → finished_at, over decided proposals only. */
+    decision_p50_ms: z.number().int().nonnegative().nullable(),
+    decision_p95_ms: z.number().int().nonnegative().nullable(),
+    /** Sum of approved_total_paise on settlement rows opened in the window. */
+    approved_value_paise: z.number().int().nonnegative(),
+    /** Same, restricted to COMPLETED. */
+    settled_value_paise: z.number().int().nonnegative(),
+    injections_blocked: z.number().int().nonnegative(),
+    degradations: z.number().int().nonnegative(),
+  })
+  .strict();
+export type AnalyticsTotals = z.infer<typeof AnalyticsTotalsSchema>;
+
+/** One time bucket: hourly for 24h, daily for 7d/30d. Empty buckets are present
+ *  with zeroes so a chart never has to invent a gap. */
+export const VolumeBucketSchema = z
+  .object({
+    bucket_start: IsoDateTime,
+    approved: z.number().int().nonnegative(),
+    escalated: z.number().int().nonnegative(),
+    declined: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+  })
+  .strict();
+export type VolumeBucket = z.infer<typeof VolumeBucketSchema>;
+
+export const OutcomeShareSchema = z
+  .object({
+    outcome: OutcomeKindSchema,
+    count: z.number().int().nonnegative(),
+    share_pct: z.number(),
+  })
+  .strict();
+export type OutcomeShare = z.infer<typeof OutcomeShareSchema>;
+
+/** Per-rule verdict tally from gatekeeper_rule_result events. */
+export const RuleFindingSchema = z
+  .object({
+    rule_id: z.string().min(1),
+    evaluations: z.number().int().nonnegative(),
+    fail: z.number().int().nonnegative(),
+    escalate: z.number().int().nonnegative(),
+  })
+  .strict();
+export type RuleFinding = z.infer<typeof RuleFindingSchema>;
+
+/** Per-stage wall-clock from stage_completed.duration_ms. */
+export const StageLatencySchema = z
+  .object({
+    stage: z.string().min(1),
+    runs: z.number().int().nonnegative(),
+    p50_ms: z.number().int().nonnegative(),
+    p95_ms: z.number().int().nonnegative(),
+    failures: z.number().int().nonnegative(),
+  })
+  .strict();
+export type StageLatency = z.infer<typeof StageLatencySchema>;
+
+export const SettlementStateSchema = z
+  .object({
+    state: z.string().min(1),
+    count: z.number().int().nonnegative(),
+    value_paise: z.number().int().nonnegative(),
+  })
+  .strict();
+export type SettlementStateCount = z.infer<typeof SettlementStateSchema>;
+
+export const SettlementSummarySchema = z
+  .object({
+    opened: z.number().int().nonnegative(),
+    paid: z.number().int().nonnegative(),
+    completed: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    /** paid / opened; null when nothing was opened in the window. */
+    paid_rate_pct: z.number().nullable(),
+    states: z.array(SettlementStateSchema),
+  })
+  .strict();
+export type SettlementSummary = z.infer<typeof SettlementSummarySchema>;
+
+export const ApprovalsSummarySchema = z
+  .object({
+    pending: z.number().int().nonnegative(),
+    approved: z.number().int().nonnegative(),
+    rejected: z.number().int().nonnegative(),
+    /** created_at → resolved_at median, over resolved rows in the window. */
+    median_decision_ms: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+export type ApprovalsSummary = z.infer<typeof ApprovalsSummarySchema>;
+
+/** GET /v1/admin/analytics?window=… */
+export const AnalyticsResponseSchema = z
+  .object({
+    window: AnalyticsWindowSchema,
+    bucket: z.enum(["hour", "day"]),
+    from: IsoDateTime,
+    generated_at: IsoDateTime,
+    rules_version: RulesVersion,
+    totals: AnalyticsTotalsSchema,
+    volume: z.array(VolumeBucketSchema),
+    outcomes: z.array(OutcomeShareSchema),
+    rule_findings: z.array(RuleFindingSchema),
+    stage_latency: z.array(StageLatencySchema),
+    settlement: SettlementSummarySchema,
+    approvals: ApprovalsSummarySchema,
+  })
+  .strict();
+export type AnalyticsResponse = z.infer<typeof AnalyticsResponseSchema>;
+
+/* ------------------------- §7.6 transaction list -------------------------
+ * The operational index the trace screen was missing: without it a tx_id can
+ * only be reached by having watched it happen.
+ */
+
+export const TxListRowSchema = z
+  .object({
+    tx_id: TxId,
+    agent_id: z.string().min(1),
+    stage: z.string().min(1),
+    /** null while still in flight. */
+    outcome: OutcomeKindSchema.nullable(),
+    /** Mandate total for APPROVED, else the settlement row's approved total. */
+    value_paise: z.number().int().nonnegative().nullable(),
+    /** First blocking rule id for DECLINED, first escalating rule for ESCALATED. */
+    reason: z.string().nullable(),
+    rules_version: RulesVersion.nullable(),
+    settlement_state: z.string().nullable(),
+    created_at: IsoDateTime,
+    finished_at: IsoDateTime.nullable(),
+    duration_ms: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+export type TxListRow = z.infer<typeof TxListRowSchema>;
+
+export const TxListResponseSchema = z
+  .object({
+    transactions: z.array(TxListRowSchema),
+    /** Total matching the filter, before the limit. */
+    total: z.number().int().nonnegative(),
+  })
+  .strict();
+export type TxListResponse = z.infer<typeof TxListResponseSchema>;

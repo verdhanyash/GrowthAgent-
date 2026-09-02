@@ -26,8 +26,19 @@ export const SettlementLine = z
     sku: z.string().min(1).max(64),
     qty: z.number().int().positive().max(99),
     /** RAW merchant list price minus approved line discount — already
-     *  computed & gatekeeper-checked upstream. Settlement never re-prices. */
+     *  computed & gatekeeper-checked upstream. Settlement never re-prices.
+     *
+     *  A cart line whose approved net does not divide evenly by its quantity
+     *  is emitted as TWO lines for the same SKU differing by one paise
+     *  (e.g. 3 @ net 69097 ⇒ 1×23033 + 2×23032), because no single integer
+     *  unit price can multiply to 69097. Σ qty×unit therefore always equals
+     *  `total_amount_paise` EXACTLY; the hold layer sums same-SKU lines. */
     unit_price_paise: Paise,
+    /** Made-to-order line: the gatekeeper approved it under
+     *  `stock_policy.backorder_allowed_skus` despite insufficient stock, so
+     *  settlement records the units WITHOUT taking an inventory hold. Frozen
+     *  into the digest so the resume path needs no rules lookup. */
+    backordered: z.boolean().optional(),
   })
   .strict();
 export type SettlementLine = z.infer<typeof SettlementLine>;
@@ -40,7 +51,9 @@ export const SettleableProposal = z
     tx_id: TxId,
     proposal_id: z.string().min(1), // negotiation output id (frozen)
     proposal_sha256: z.string().length(64), // digest of the frozen proposal bytes
-    lines: z.array(SettlementLine).min(1).max(20),
+    /** Cap is 2× the gatekeeper's 25-line ceiling: the paise-remainder split
+     *  above can turn each approved cart line into two settlement lines. */
+    lines: z.array(SettlementLine).min(1).max(50),
     total_amount_paise: Paise,
     currency: Currency,
     gatekeeper: z

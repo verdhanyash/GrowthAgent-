@@ -22,6 +22,27 @@ export function assertSafeInt(n: number, label = "value"): number {
   return n;
 }
 
+/**
+ * Parse a paise value that arrived as a STRING (every BIGINT column comes back
+ * from node-pg that way) into an exact non-negative safe integer, or null.
+ *
+ * `Number(row.amount_paise)` is the tempting one-liner and it is what audit 10.3
+ * flags: above 2^53 it rounds silently, so a tampered or corrupt row could make
+ * a gateway amount compare EQUAL to a value it does not actually equal. Round-
+ * tripping the digits back to a string is what makes the check exact — anything
+ * that does not survive the round trip is refused rather than approximated.
+ */
+export function parsePaiseExact(raw: unknown): number | null {
+  if (typeof raw === "number") {
+    return Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+  }
+  if (typeof raw !== "string" && typeof raw !== "bigint") return null;
+  const s = String(raw).trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) && String(n) === s.replace(/^0+(?=\d)/, "") ? n : null;
+}
+
 /** Percent (e.g. 7.5) -> integer basis points (750). ONE conversion point. */
 export function toBps(pct: number): number {
   if (!Number.isFinite(pct)) {

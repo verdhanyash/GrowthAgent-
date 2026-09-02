@@ -72,17 +72,32 @@ export function signablePreimage(m: CartMandate): Record<string, unknown> {
  * net (never from an LLM). So the exact economic invariants are integer:
  *   subtotal == Σ(unit×qty)   and   subtotal − discount == total.
  * `discount_pct` is a one-decimal DISPLAY projection of the exact paise
- * discount (the gatekeeper allocates with ROUND_HALF_UP, so a strict
- * floor(subtotal×pct/100) round-trip need not land on the paise to the unit);
- * it is checked only to agree with `discount_paise` within a 1-paise rounding
- * tolerance. cart_hash + merchant_sig still bind every field exactly.
+ * discount, so it is checked only for AGREEMENT with `discount_paise` within
+ * the error that one-decimal rounding can itself introduce — see
+ * `displayPctTolerancePaise`. cart_hash + merchant_sig still bind every field
+ * exactly, so the display value cannot be tampered with independently.
  */
 export function arithmeticConsistent(m: CartMandate): boolean {
   const subtotal = m.items.reduce((s, it) => s + it.unit_price_paise * it.qty, 0);
   if (subtotal !== m.subtotal_paise) return false;
   if (m.subtotal_paise - m.discount_paise !== m.total_paise) return false;
   const impliedByPct = Math.round((m.subtotal_paise * m.discount_pct) / 100);
-  return Math.abs(impliedByPct - m.discount_paise) <= 1;
+  return Math.abs(impliedByPct - m.discount_paise) <= displayPctTolerancePaise(m.subtotal_paise);
+}
+
+/**
+ * Paise tolerance implied by rendering `discount_pct` to ONE decimal place.
+ *
+ * A one-decimal percent can differ from the exact ratio by up to 0.05 pp, which
+ * on a subtotal of S paise is S × 0.0005 = S/2000 paise — 50 paise on a ₹1,000
+ * cart, not 1. The old flat ±1 paise tolerance therefore rejected perfectly
+ * honest mandates whenever discount_paise/subtotal did not happen to land on a
+ * tenth of a percent (e.g. S=100000, discount=745 ⇒ pct 0.7 ⇒ implied 700,
+ * a 45-paise gap), and the MandateBuilder's own self-check turned that into a
+ * 500 on the APPROVED poll. `+1` absorbs the Math.round of the implied amount.
+ */
+export function displayPctTolerancePaise(subtotalPaise: number): number {
+  return Math.ceil(Math.abs(subtotalPaise) / 2000) + 1;
 }
 
 export interface MandateCrypto {

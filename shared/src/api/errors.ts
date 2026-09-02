@@ -24,6 +24,7 @@ export const ErrorCode = z.enum([
   "APPROVAL_ALREADY_RESOLVED", // 409 second resolve attempt loses the race
   "RULES_VERSION_CONFLICT", // 409 optimistic concurrency on PUT /admin/rules
   "RULES_DRIFTED", // 409 approval attempted against a different rules_version
+  "RULES_INCREASE_REQUIRES_CONFIRMATION", // 409 guarded limit raised without confirm_increase (§7.1)
   "RULES_INCREASE_COOLDOWN", // 409 a raise to the same field landed <15 min ago (§7.1)
   "DEMO_RESET_BLOCKED", // 409 reset refused: live reservations / non-terminal tx (§7.4)
   "RATE_LIMITED_HTTP", // 429 transport-layer limiter (NOT business velocity)
