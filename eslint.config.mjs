@@ -15,6 +15,14 @@ export default tseslint.config(
       "no-console": ["error", { allow: ["warn", "error"] }],
     },
   },
+  // CLI scripts under scripts/** print to stdout BY DESIGN — the terminal output
+  // is the deliverable (the demo narration, the exported-contract confirmation,
+  // the audit-verification PASS/FAIL table). `no-console` there would only ever
+  // be silenced line by line, so it is scoped off instead.
+  {
+    files: ["scripts/**/*.ts"],
+    rules: { "no-console": "off" },
+  },
   // Purity enforcement for the money gate (gatekeeper.md §16.4): no clock,
   // no randomness, no network, no process access inside src/gatekeeper/**.
   // (Date.parse on INPUT strings is allowed — deterministic; only the

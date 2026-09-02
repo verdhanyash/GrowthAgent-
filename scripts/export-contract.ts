@@ -1,0 +1,204 @@
+/**
+ * scripts/export-contract.ts — Exports contract schemas to OpenAPI JSON (§12).
+ *
+ * Generates docs/openapi.json describing the master endpoint inventory (rows 1–18).
+ */
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const openApiDoc = {
+  openapi: "3.1.0",
+  info: {
+    title: "GrowthAgent API",
+    version: "1.0.0",
+    description: "Autonomous AI growth system with ONE deterministic gatekeeper. Built for Razorpay AI Buildathon.",
+  },
+  servers: [
+    { url: "http://127.0.0.1:3000", description: "Local development & demo server" },
+  ],
+  paths: {
+    "/v1/carts/proposals": {
+      post: {
+        summary: "Create Cart Proposal",
+        description: "Submit shopping intent from buyer agent; starts asynchronous pipeline.",
+        security: [{ AgentKeyAuth: [] }],
+        responses: {
+          "202": { description: "Proposal accepted; returns tx_id and stream/poll URLs." },
+          "400": { description: "Validation error." },
+          "401": { description: "Unauthorized or revoked key." },
+          "409": { description: "Idempotency conflict." },
+          "429": { description: "Rate limited." },
+        },
+      },
+    },
+    "/v1/carts/proposals/{txId}": {
+      get: {
+        summary: "Poll Cart Proposal Status",
+        description: "Poll transaction state; returns terminal outcome when complete.",
+        security: [{ AgentKeyAuth: [] }],
+        responses: {
+          "200": { description: "Transaction state (pending or terminal outcome union)." },
+          "404": { description: "Transaction not found or foreign agent." },
+          "429": {
+            description:
+              "Source exhausted its FAILED-authentication budget (RATE_LIMITED_HTTP). Successful " +
+              "polling is never throttled.",
+          },
+        },
+      },
+    },
+    "/v1/stream-tickets": {
+      post: {
+        summary: "Mint SSE Stream Ticket",
+        description: "Exchange X-Agent-Key for a short-lived SSE ticket for browser EventSource.",
+        security: [{ AgentKeyAuth: [] }],
+        responses: {
+          "200": { description: "Ticket minted with expiration." },
+          "429": { description: "Rate limited (RATE_LIMITED_HTTP)." },
+        },
+      },
+    },
+    "/v1/stream/{txId}": {
+      get: {
+        summary: "Server-Sent Events Transaction Audit Stream",
+        description:
+          "SSE stream projecting the hash-chained audit log for one transaction. Admission is " +
+          "checked BEFORE the first byte, so a refusal is an ordinary JSON error rather than a " +
+          "half-open stream.",
+        responses: {
+          "200": { description: "SSE event stream." },
+          "401": { description: "Missing/invalid ticket or agent key." },
+          "404": { description: "Transaction not found or foreign agent." },
+          "429": {
+            description:
+              "Concurrent-stream ceiling reached (RATE_LIMITED_HTTP); details carry the global " +
+              "and per-agent limits.",
+          },
+        },
+      },
+    },
+    "/v1/webhooks/razorpay": {
+      post: {
+        summary: "Razorpay Payment Webhook Ingress",
+        description: "Raw HMAC-verified ingress moving transactions from AWAITING_PAYMENT to PAID.",
+        security: [{ RazorpaySignature: [] }],
+        responses: {
+          "200": { description: "Webhook verified and processed." },
+          "401": { description: "Invalid HMAC signature." },
+        },
+      },
+    },
+    "/v1/admin/rules": {
+      get: {
+        summary: "Get Merchant Rules",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "Current active MerchantRules and version." } },
+      },
+      put: {
+        summary: "Patch Merchant Rules",
+        security: [{ AdminTokenAuth: [] }],
+        responses: {
+          "200": { description: "Rules updated and version bumped." },
+          "409": { description: "Version conflict or limit raise cooldown." },
+        },
+      },
+    },
+    "/v1/admin/rules/history": {
+      get: {
+        summary: "Get Rules Changelog History",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "Immutable version history log." } },
+      },
+    },
+    "/v1/admin/approvals": {
+      get: {
+        summary: "List Escalations Inbox",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "List of pending or resolved escalations." } },
+      },
+    },
+    "/v1/admin/approvals/{id}/approve": {
+      post: {
+        summary: "Human Approve Escalation",
+        security: [{ AdminTokenAuth: [] }],
+        responses: {
+          "202": { description: "Settlement resumes with the SAME frozen proposal." },
+          "409": { description: "Already resolved or rules drifted." },
+        },
+      },
+    },
+    "/v1/admin/approvals/{id}/reject": {
+      post: {
+        summary: "Human Reject Escalation",
+        security: [{ AdminTokenAuth: [] }],
+        responses: {
+          "202": { description: "Proposal marked terminal DECLINED." },
+          "409": { description: "Already resolved." },
+        },
+      },
+    },
+    "/v1/admin/audit/{txId}/replay": {
+      get: {
+        summary: "Replay Hash-Chained Audit Log",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "Reconstructed timeline and hash chain validity verdict." } },
+      },
+    },
+    "/v1/admin/agents": {
+      get: {
+        summary: "List Agent Identities",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "List of agent identities." } },
+      },
+    },
+    "/v1/admin/agents/{agentId}/revoke": {
+      post: {
+        summary: "Revoke Agent API Key",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "Agent key revoked." } },
+      },
+    },
+    "/v1/demo/scenarios/{name}": {
+      post: {
+        summary: "Launch Demo Scenario",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "202": { description: "Scenario run launched asynchronously." } },
+      },
+    },
+    "/v1/demo/scenarios/runs/{runId}": {
+      get: {
+        summary: "Poll Demo Scenario Run Verdict",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "Self-grading assertions summary." } },
+      },
+    },
+    "/v1/demo/chaos": {
+      get: { summary: "List Armed Chaos Flags", security: [{ AdminTokenAuth: [] }] },
+      put: { summary: "Arm Chaos Flag", security: [{ AdminTokenAuth: [] }] },
+      delete: { summary: "Disarm All Chaos Flags", security: [{ AdminTokenAuth: [] }] },
+    },
+    "/v1/demo/reset": {
+      post: {
+        summary: "Reset Demo to Pristine State",
+        security: [{ AdminTokenAuth: [] }],
+        responses: { "200": { description: "Demo state re-seeded." }, "409": { description: "Reset blocked by active holds." } },
+      },
+    },
+  },
+  components: {
+    securitySchemes: {
+      AgentKeyAuth: { type: "apiKey", in: "header", name: "X-Agent-Key" },
+      AdminTokenAuth: { type: "apiKey", in: "header", name: "X-Admin-Token" },
+      RazorpaySignature: { type: "apiKey", in: "header", name: "X-Razorpay-Signature" },
+    },
+  },
+};
+
+const outPath = resolve(__dirname, "../docs/openapi.json");
+mkdirSync(dirname(outPath), { recursive: true });
+writeFileSync(outPath, JSON.stringify(openApiDoc, null, 2), "utf8");
+console.log(`\x1b[32m✔ Exported OpenAPI contract to ${outPath}\x1b[0m`);

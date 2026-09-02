@@ -2,7 +2,7 @@
   "name": "growthagent",
   "private": true,
   "version": "0.1.0",
-  "description": "Autonomous AI growth system with ONE deterministic gatekeeper — Razorpay AI Buildathon",
+  "description": "Autonomous AI growth system with ONE deterministic gatekeeper \u2014 Razorpay AI Buildathon",
   "type": "module",
   "workspaces": [
     "shared",
@@ -13,12 +13,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm run build -w @growthagent/shared && npm run build -w @growthagent/api",
+    "build": "npm run build -w @growthagent/shared && npm run build -w @growthagent/api && npm run build -w @growthagent/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "demo": "tsx scripts/demo.ts",
+    "export:contract": "tsx scripts/export-contract.ts",
     "lint": "eslint .",
     "db:up": "docker compose up -d",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "verify:audit": "tsx scripts/verify-vulnerabilities.ts"
   },
   "devDependencies": {
     "eslint": "^9.15.0",
