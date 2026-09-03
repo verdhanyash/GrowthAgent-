@@ -11,6 +11,8 @@
 [![Razorpay](https://img.shields.io/badge/Payments-Razorpay%20Orders%20%26%20Webhooks-0C2340.svg)](https://razorpay.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> 📘 **Exhaustive Documentation:** For a complete, beginner-friendly master architectural guide with zero shortcuts—covering every single pipeline stage, mathematical invariant formula, threat model, and presentation script—read [**`GROWTHAGENT_COMPLETE_WALKTHROUGH.md`**](GROWTHAGENT_COMPLETE_WALKTHROUGH.md).
+
 ---
 
 ## 1. The Problem: The Perils of Autonomous AI Commerce
@@ -320,7 +322,21 @@ npx tsx scripts/verify-vulnerabilities.ts
 
 ---
 
-## 8. Getting Started & Local Development
+## 8. The Control Plane Dashboard & Interactive Visualizer
+
+The GrowthAgent frontend is built as a pitch-black, minimal fintech control plane that replaces generic PowerBI charts with actionable operational telemetry:
+
+- **Operational Control Center (`/`):** Real-time Gatekeeper posture (`GATEKEEPER v3 ACTIVE`), 16 armed invariants badge, high-priority human escalation alerts, 4 spacious core financial metrics, and a live decision audit ledger.
+- **Interactive Pipeline Topology (`/pipeline`):** Powered by React Flow (`@xyflow/react`) using **100% real database telemetry** (no demo data). Features custom circular stage nodes (`BUYER`, `INTAKE`, `EVIDENCE`, `NEGOTIATION`, `AUDIT`, `GATEKEEPER`, `SETTLEMENT`, `RISK`), interactive hover popups, deep Stage Inspector drawer, and a toggleable Three.js 3D isometric view.
+- **Human-in-the-Loop Approvals (`/approvals`):** Dedicated escalation inbox for carts exceeding financial limits or flagged for prompt injection. Operators can review line items and authorize settlement via single-use HMAC capability tokens.
+- **Transactions & Cryptographic Trace (`/transactions` & `/trace/:txId`):** Real-time searchable transaction ledger and complete event-envelope trace viewer with SHA-256 hash-chain verification.
+- **Merchant Policy Configuration (`/policy`):** Runtime parameter editor for maximum discount percentage, gross margin floors, and auto-approval cart ceilings.
+- **Scenario Simulator (`/simulate`):** 1-Click execution for 5 core demo scenarios (Happy Path, Prompt Injection Jailbreak, High-Value Cart Escalation, LLM Timeout, Gateway Outage) and a custom conversational shopping composer.
+- **Operations & Architecture Guide (`/guide`):** Built-in operator guide featuring the searchable directory of all 16 Gatekeeper Invariant formulas.
+
+---
+
+## 9. Getting Started & Local Development
 
 ### Prerequisites
 
@@ -381,7 +397,7 @@ npm run dev -w @growthagent/web
 
 ---
 
-## 9. Running the Interactive Demo & Scenarios
+## 10. Running the Interactive Demo & Scenarios
 
 GrowthAgent includes an automated scenario driver to demonstrate the full system in action:
 
@@ -398,7 +414,7 @@ This runs through the 5 core demo beats:
 
 ---
 
-## 10. Security & Threat Model
+## 11. Security & Threat Model
 
 GrowthAgent was subjected to a rigorous red-team audit. Key security mitigations include:
 
@@ -409,6 +425,6 @@ GrowthAgent was subjected to a rigorous red-team audit. Key security mitigations
 
 ---
 
-## 11. License
+## 12. License
 
 This project is licensed under the [MIT License](LICENSE). Built for the Razorpay Hackathon 

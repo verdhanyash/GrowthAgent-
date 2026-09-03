@@ -80,10 +80,10 @@ function HeaderNav(): JSX.Element {
   ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-black/75 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-[1320px] items-center justify-between px-6">
-        {/* Left: Brand + Status Pill */}
-        <div className="flex items-center gap-6">
+    <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-black/80 backdrop-blur-md">
+      <div className="mx-auto flex h-16 max-w-[1360px] items-center justify-between px-6">
+        {/* Left: Brand + Live Pill */}
+        <div className="flex items-center gap-3">
           <Link to="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white font-mono text-[11px] font-black text-black shadow-sm">
               G
@@ -93,21 +93,36 @@ function HeaderNav(): JSX.Element {
             </span>
           </Link>
 
-          <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[11px] text-neutral-400 sm:flex">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-ok" />
-            </span>
-            <span className="font-mono text-[10px] tracking-wide">GATEKEEPER ACTIVE</span>
+          <div className="flex items-center gap-1.5 rounded-full border border-neutral-800 bg-[#0d0d0d] px-2.5 py-0.5 text-[11px] font-medium text-neutral-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-ok" />
+            <span>Live</span>
           </div>
         </div>
 
-        {/* Center/Right: Navigation Tabs */}
+        {/* Center: Navigation Tabs */}
         <nav aria-label="Main" className="flex items-center gap-1 overflow-x-auto py-1">
           {NAV_ITEMS.map((n) => (
             <Tab key={n.to} to={n.to} label={n.label} badge={n.badge} />
           ))}
         </nav>
+
+        {/* Right: Search Icon + YP User Avatar */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+            title="Search"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+
+          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 font-mono text-[11px] font-bold text-neutral-200">
+            YP
+          </div>
+        </div>
       </div>
     </header>
   );

@@ -30,13 +30,12 @@ interface StagePoint {
 const STAGES: StagePoint[] = [
   { id: "buyer", label: "Buyer Ingress", sub: "HTTP API", x: -14, y: 0, z: 0, color: 0x888888 },
   { id: "intake", label: "Intake & Tagger", sub: "Stage 1", x: -10, y: 0.5, z: 2, color: 0x666666 },
-  { id: "context", label: "Evidence Pack", sub: "Stage 2", x: -6, y: -0.2, z: -1, color: 0x666666 },
+  { id: "evidence", label: "Evidence Pack", sub: "Stage 2", x: -6, y: -0.2, z: -1, color: 0x666666 },
   { id: "negotiation", label: "AI Negotiator", sub: "Stage 3", x: -2, y: 1.0, z: 2, color: 0xaaaaaa },
-  { id: "citation", label: "Citation Auditor", sub: "Stage 4", x: 2, y: 0, z: -1, color: 0x666666 },
+  { id: "audit", label: "Citation Auditor", sub: "Stage 4", x: 2, y: 0, z: -1, color: 0x666666 },
   { id: "gatekeeper", label: "Gatekeeper (16 Rules)", sub: "Authority", x: 6, y: 1.2, z: 1, color: 0xffffff },
-  { id: "approvals", label: "Approvals Inbox", sub: "Human", x: 9, y: 3.5, z: 4, color: 0xfab219 },
-  { id: "settlement", label: "Settlement Rail", sub: "Razorpay", x: 10, y: -1.5, z: -2, color: 0x0ca30c },
-  { id: "audit", label: "Audit Hash Chain", sub: "SHA-256", x: 14, y: 0.5, z: 0, color: 0x4444ff },
+  { id: "settlement", label: "Settlement Rail", sub: "Razorpay", x: 10, y: 1.8, z: -2, color: 0x0ca30c },
+  { id: "risk", label: "Risk / Approvals", sub: "Human", x: 10, y: -1.8, z: 3, color: 0xfab219 },
 ];
 
 export function Pipeline3D({
@@ -92,7 +91,7 @@ export function Pipeline3D({
       if (selectedTx) {
         if (selectedTx.outcome === "APPROVED" && (stage.id === "settlement" || stage.id === "audit")) {
           nodeColor = 0x0ca30c;
-        } else if (selectedTx.outcome === "ESCALATED" && stage.id === "approvals") {
+        } else if (selectedTx.outcome === "ESCALATED" && stage.id === "risk") {
           nodeColor = 0xfab219;
         } else if (selectedTx.outcome === "DECLINED" && stage.id === "gatekeeper") {
           nodeColor = 0xd03b3b;
@@ -120,7 +119,7 @@ export function Pipeline3D({
     });
 
     // Connecting Curve
-    const points = STAGES.filter((s) => s.id !== "approvals").map(
+    const points = STAGES.filter((s) => s.id !== "risk").map(
       (s) => new THREE.Vector3(s.x, s.y, s.z),
     );
     const curve = new THREE.CatmullRomCurve3(points);

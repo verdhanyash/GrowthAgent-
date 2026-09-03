@@ -48,14 +48,12 @@ describe("AnalyticsScreen", () => {
     }
   });
 
-  it("names every chart panel", () => {
+  it("names the operational panels", () => {
     render(withProviders(<AnalyticsScreen />));
     for (const title of [
-      "Volume over time",
-      "Outcome mix",
-      "Rules that intervened",
-      "Stage latency",
-      "Settlement",
+      "Recent Decisions & Live Stream",
+      "Gatekeeper Interventions",
+      "Settlement & Money Rails",
     ]) {
       expect(screen.getByRole("heading", { name: title })).toBeTruthy();
     }
