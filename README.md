@@ -411,4 +411,4 @@ GrowthAgent was subjected to a rigorous red-team audit. Key security mitigations
 
 ## 11. License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENSE). Built for the Razorpay Hackathon 
