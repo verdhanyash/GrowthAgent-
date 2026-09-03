@@ -6,6 +6,7 @@
  * hash), the auth matrix on an admin route, revoke → real 401 AGENT_KEY_REVOKED
  * on the buyer surface, idempotent re-revoke, and the unknown-agent 404.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any -- spec asserts on loosely-typed JSON response bodies */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   startApi,

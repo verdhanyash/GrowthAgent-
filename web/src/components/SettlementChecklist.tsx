@@ -1,42 +1,66 @@
 /**
- * SettlementChecklist — the post-approval money rail, step by step. Each
- * settlement_step event is appended by the reducer (retries included), so we
- * show them in arrival order with status ticks. RAZORPAY_ORDER_CREATE success
- * reveals the order id; amounts render through shared's integer-paise formatter.
- * The provider mode (mock vs razorpay_test) is shown honestly — never hidden.
+ * web/src/components/SettlementChecklist.tsx — the money rail, step by step.
+ *
+ * One row per settlement_step event: stock hold, Razorpay order, payment
+ * capture, webhook. Retries show as their own row with an attempt number rather
+ * than silently replacing the first try — a settlement that succeeded on attempt
+ * three is a different story from one that succeeded immediately.
  */
 import { formatPaise, type EventPayloadMap } from "@growthagent/shared";
 import { Chip, Empty, Mono } from "./ui.js";
 
 type Step = EventPayloadMap["settlement_step"];
 
-function statusChip(status: string): JSX.Element {
+function tone(status: string): "ok" | "bad" | "run" | "default" {
   const s = status.toUpperCase();
-  if (s === "SUCCEEDED" || s === "OK") return <Chip tone="ok">✓ {status.toLowerCase()}</Chip>;
-  if (s === "FAILED") return <Chip tone="bad">✕ failed</Chip>;
-  if (s === "STARTED" || s === "PENDING") return <Chip tone="run">{status.toLowerCase()}</Chip>;
-  return <Chip tone="info">{status.toLowerCase()}</Chip>;
+  if (s === "SUCCEEDED" || s === "OK" || s === "PAID") return "ok";
+  if (s === "FAILED") return "bad";
+  if (s === "STARTED" || s === "PENDING") return "run";
+  return "default";
 }
 
 export function SettlementChecklist({ steps }: { steps: Step[] }): JSX.Element {
-  if (steps.length === 0) return <Empty>No settlement steps (only runs after APPROVE).</Empty>;
+  if (steps.length === 0) {
+    return <Empty>Settlement runs only after the gatekeeper approves.</Empty>;
+  }
+
   return (
-    <ol className="space-y-2">
-      {steps.map((s, i) => (
-        <li key={`${s.step}-${i}`} className="flex flex-wrap items-center justify-between gap-2 rounded border border-edge/60 px-3 py-2">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[13px] text-ink">{s.step}</span>
-            {s.attempt > 1 && <span className="text-[11px] text-mute">try {s.attempt}</span>}
-            {s.provider_mode && <Chip tone="info">{s.provider_mode}</Chip>}
-          </div>
-          <div className="flex items-center gap-2 text-[12px]">
-            {typeof s.amount_paise === "number" && <span className="text-ink/90">{formatPaise(s.amount_paise)}</span>}
-            {s.razorpay_order_id && <Mono value={s.razorpay_order_id} />}
-            {s.error_code && <span className="text-bad">{s.error_code}</span>}
-            {statusChip(s.status)}
-          </div>
-        </li>
-      ))}
+    <ol className="divide-y divide-edge/60">
+      {steps.map((s, i) => {
+        const t = tone(s.status);
+        return (
+          <li key={`${s.step}-${i}`} className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="w-4 shrink-0 text-right font-mono text-[11px] text-mute">
+                {i + 1}
+              </span>
+              <div className="min-w-0">
+                <div className="text-[12px] text-ink">
+                  {s.step.replace(/_/g, " ").toLowerCase()}
+                  {s.attempt > 1 && (
+                    <span className="ml-2 text-[11px] text-mute">attempt {s.attempt}</span>
+                  )}
+                </div>
+                {s.razorpay_order_id !== undefined && s.razorpay_order_id !== null && (
+                  <Mono value={s.razorpay_order_id} truncate className="max-w-[180px]" />
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {typeof s.amount_paise === "number" && (
+                <span className="font-mono text-[12px] text-ink">{formatPaise(s.amount_paise)}</span>
+              )}
+              {s.error_code !== undefined && s.error_code !== null && (
+                <span className="font-mono text-[11px] text-bad-bright">{s.error_code}</span>
+              )}
+              <Chip tone={t} withDot={t === "run"}>
+                {s.status.toLowerCase()}
+              </Chip>
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }

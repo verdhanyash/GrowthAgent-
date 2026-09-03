@@ -129,3 +129,70 @@ describe("AuditChain", () => {
     expect(persisted!.hash).toBe(hashEntry(persisted!.prev_hash, bodyOf(persisted!)));
   });
 });
+
+/**
+ * audit S3 / 11.1 / 14.4 — the chain used to allocate seq from a JS variable, so
+ * TWO instances against one database (i.e. any horizontally-scaled deploy) both
+ * computed `lastSeq + 1`, collided on audit_log_pkey and crashed every second
+ * request. These are the tests that were missing.
+ */
+describe("AuditChain — multiple writers on one database (audit S3)", () => {
+  it("two instances interleaving appends produce ONE contiguous, valid chain", async () => {
+    const a = new AuditChain(db);
+    const b = new AuditChain(db);
+    await a.boot();
+    await b.boot();
+
+    const appends: Promise<{ seq: number }>[] = [];
+    for (let i = 0; i < 20; i++) {
+      // Alternate replicas, all issued before any of them resolves.
+      appends.push((i % 2 === 0 ? a : b).append(mkAppend(`tx_${i % 3}`, `e${i}`, actor)));
+    }
+    const rows = await Promise.all(appends);
+
+    // No collisions, no gaps, no duplicates: exactly 1..20 across both writers.
+    expect(rows.map((r) => r.seq).sort((x, y) => x - y)).toEqual(
+      Array.from({ length: 20 }, (_, i) => i + 1),
+    );
+    const v = await a.verify();
+    expect(v).toEqual({ chain_valid: true, broken_at_seq: null, checked: 20 });
+  });
+
+  it("an instance whose cached tail is stale still links correctly", async () => {
+    const a = new AuditChain(db);
+    const b = new AuditChain(db);
+    await a.boot();
+    await b.boot(); // both cached lastSeq = 0
+
+    const first = await a.append(mkAppend("tx_a", "written-by-a", actor));
+    expect(b.headSeq()).toBe(0); // b's CACHE is now wrong on purpose
+
+    const second = await b.append(mkAppend("tx_a", "written-by-b", actor));
+    expect(second.seq).toBe(first.seq + 1);
+    expect(second.prev_hash).toBe(first.hash); // read the DB tail, not the cache
+    expect((await b.verify()).chain_valid).toBe(true);
+  });
+
+  it("headSeqNow() reports the global head another replica advanced", async () => {
+    const a = new AuditChain(db);
+    const b = new AuditChain(db);
+    await a.boot();
+    await b.boot();
+    await a.append(mkAppend("tx_a", "e1", actor));
+    await a.append(mkAppend("tx_a", "e2", actor));
+    expect(b.headSeq()).toBe(0); // local cache
+    expect(await b.headSeqNow()).toBe(2); // authoritative
+  });
+
+  it("survives a TRUNCATE under a live instance (tail re-read, not remembered)", async () => {
+    const a = new AuditChain(db);
+    await a.boot();
+    await a.append(mkAppend("tx_a", "e1", actor));
+    await a.append(mkAppend("tx_a", "e2", actor));
+    await db.query(`TRUNCATE audit_log`);
+    const afterWipe = await a.append(mkAppend("tx_a", "e3", actor));
+    expect(afterWipe.seq).toBe(1);
+    expect(afterWipe.prev_hash).toBeNull();
+    expect((await a.verify()).chain_valid).toBe(true);
+  });
+});

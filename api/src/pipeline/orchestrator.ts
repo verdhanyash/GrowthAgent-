@@ -19,6 +19,7 @@ import {
   canonicalJson,
   digestView,
   MEERA_RULES_V3,
+  SettleableProposal,
   type AgentVelocitySnapshot,
   type CampaignPriorityPayload,
   type CitationAuditResult,
@@ -27,7 +28,6 @@ import {
   type MerchantRulesConfig,
   type NegotiationProposal,
   type RuleId,
-  type SettleableProposal,
   type StageName,
 } from "@growthagent/shared";
 import type { PgPool } from "../db/client.js";
@@ -46,11 +46,11 @@ import type { NarratorAudience } from "@growthagent/shared";
 import type { SettlementConfig } from "../settlement/config.js";
 import type { SettlementProvider } from "../settlement/provider/types.js";
 import type { VelocityInput } from "../settlement/reserve.js";
-import { AuditChain } from "./audit-chain.js";
-import type { ChainActor } from "./audit-chain.js";
+import type { AuditChain } from "./audit-chain.js";
 import { toProposedCart } from "./cart-adapter.js";
-import { PipelineEmitter, systemActor } from "./emitter.js";
-import { scanCustomerNote, type TaggerOutput } from "./tagger.js";
+import type { PipelineEmitter } from "./emitter.js";
+import { systemActor } from "./emitter.js";
+import { scanCustomerNote } from "./tagger.js";
 import { buildEvidencePack } from "./evidence.js";
 import { createApproval, makeApprovalTokenConsumer, mintApprovalCredentials, resolveApproval } from "./approvals.js";
 
@@ -228,9 +228,12 @@ export async function runPipeline(deps: PipelineDeps, input: RunInput): Promise<
   if (auditSeq.seq !== null) ctx.noteGroundable(auditSeq.seq, "citation_audit_result", auditSeq.audit);
 
   /* ---- GATEKEEPER ------------------------------------------------------- */
+  // ONE rules snapshot governs BOTH the gate decision and the settleable minted
+  // from it. Fetching twice would let a live PUT /v1/admin/rules land between
+  // them and mint a cart under rules the gate never evaluated.
+  const rules = await deps.rules();
   const gate = await ctx.stage("GATEKEEPER", async () => {
     await ctx.setStage("GATE_CHECKING");
-    const rules = await deps.rules();
     const velocity =
       deps.velocity !== undefined
         ? await deps.velocity(input.agent.agent_id)
@@ -305,6 +308,7 @@ export async function runPipeline(deps: PipelineDeps, input: RunInput): Promise<
       gt,
       gate,
       approvalSource: "GATEKEEPER_AUTO",
+      backorderSkus: rules.stock_policy.backorder_allowed_skus,
     });
     const terminal = await ctx.settlement(settleable);
     // Persist the terminal outcome (mirrors the resume path) — AWAITING_PAYMENT
@@ -339,6 +343,7 @@ export async function runPipeline(deps: PipelineDeps, input: RunInput): Promise<
     gate,
     approvalSource: "HUMAN_ESCALATION",
     approvalToken: cred.approval_token,
+    backorderSkus: rules.stock_policy.backorder_allowed_skus,
   });
   const bandReason = escalateReason(gate);
   const approval = await createApproval(deps.db, {
@@ -777,9 +782,29 @@ function escalateReason(gate: GatekeeperResult): {
 
 /**
  * Mint the SettleableProposal from the GATEKEEPER's recomputed totals (never
- * AI numbers). Lines carry the discounted UNIT price with the paise remainder
- * distributed deterministically (first-line-first) so Σ qty×unit equals the
- * recomputed net EXACTLY — settlement moves precisely the approved amount.
+ * AI numbers), so Σ qty×unit equals the recomputed net EXACTLY — settlement
+ * moves precisely the approved amount.
+ *
+ * THE PAISE-REMAINDER SPLIT. A cart line is {qty q, approved net N}. When
+ * N % q !== 0 there is NO integer unit price u with u×q === N (3 units at net
+ * 69097 want 23032.33…), so a single line per SKU cannot state the truth: the
+ * old code added the whole remainder to the unit price, inflating the line by
+ * remainder×q paise and crashing the run on its own Σ assertion. Instead the
+ * line is emitted as TWO lines for the same SKU, one paise apart:
+ *
+ *     base = ⌊N/q⌋,  rem = N − base×q  (0 ≤ rem < q)
+ *     rem units at (base+1)   +   (q − rem) units at base   ==  N   ✔
+ *
+ * `aggregateHoldLines` sums same-SKU lines back into one hold, so the
+ * UNIQUE (tx_id, sku) reservation contract is untouched.
+ *
+ * Backordered lines (H2): a line the gate let through under
+ * `stock_policy.backorder_allowed_skus` despite `qty > stock_on_hand` is
+ * flagged, so settlement records the units without taking a hold instead of
+ * refusing a cart the gatekeeper approved. The flag rides in the frozen bytes
+ * (and therefore the digest), so the escalation-resume path needs no rules
+ * lookup. Partial backorder is deliberately NOT modelled: the whole line goes
+ * made-to-order, which leaves any on-hand units available to other buyers.
  */
 export function mintSettleable(args: {
   txId: string;
@@ -788,28 +813,23 @@ export function mintSettleable(args: {
   gate: GatekeeperResult;
   approvalSource: "GATEKEEPER_AUTO" | "HUMAN_ESCALATION";
   approvalToken?: string | undefined;
+  /** rules.stock_policy.backorder_allowed_skus at gate time (default none). */
+  backorderSkus?: readonly string[] | undefined;
 }): SettleableProposal {
-  const perLine = args.gate.recomputed.per_line;
-  const baseUnits = perLine.map((pl) => {
+  const backorder = new Set(args.backorderSkus ?? []);
+  const lines: { sku: string; qty: number; unit_price_paise: number; backordered?: boolean }[] = [];
+  for (const pl of args.gate.recomputed.per_line) {
+    const item = args.gt.items.find((it) => it.sku_id === pl.sku_id);
+    if (item === undefined) throw new Error(`mintSettleable: unresolved sku ${pl.sku_id}`);
     const q = pl.quantity;
     const base = Math.floor(pl.net_paise / q);
-    return { sku_id: pl.sku_id, qty: q, base, rem: pl.net_paise - base * q };
-  });
-  let leftover = baseUnits.reduce((s, u) => s + u.rem, 0);
-  const units = baseUnits.map((u) => {
-    const add = Math.min(u.qty, leftover);
-    leftover -= add;
-    return { ...u, unit_price_paise: u.base + add };
-  });
-  if (leftover !== 0) {
-    throw new Error(`mintSettleable: ${leftover} paise undistributed (programmer bug)`);
+    const rem = pl.net_paise - base * q; // 0 <= rem < q
+    const backordered = backorder.has(pl.sku_id) && q > item.stock_on_hand;
+    const flag = backordered ? { backordered: true } : {};
+    if (rem > 0) lines.push({ sku: pl.sku_id, qty: rem, unit_price_paise: base + 1, ...flag });
+    if (q - rem > 0) lines.push({ sku: pl.sku_id, qty: q - rem, unit_price_paise: base, ...flag });
   }
 
-  const lines = units.map((u) => {
-    const item = args.gt.items.find((it) => it.sku_id === u.sku_id);
-    if (item === undefined) throw new Error(`mintSettleable: unresolved sku ${u.sku_id}`);
-    return { sku: u.sku_id, qty: u.qty, unit_price_paise: u.unit_price_paise };
-  });
   const total = args.gate.recomputed.net_paise;
   const sum = lines.reduce((s, l) => s + l.unit_price_paise * l.qty, 0);
   if (sum !== total) {
@@ -831,7 +851,10 @@ export function mintSettleable(args: {
     approval_source: args.approvalSource,
     ...(args.approvalToken !== undefined ? { approval_token: args.approvalToken } : {}),
   };
-  return { ...draft, proposal_sha256: sha256Hex(canonicalJson(digestView(draft))) };
+  const minted = { ...draft, proposal_sha256: sha256Hex(canonicalJson(digestView(draft))) };
+  // Fail at MINT, not three modules downstream: a cart whose split exceeded the
+  // 50-line ceiling (or any other contract breach) must not reach settle().
+  return SettleableProposal.parse(minted);
 }
 
 function sha256Hex(s: string): string {

@@ -17,13 +17,21 @@ const passThroughSse = (proxy: {
   });
 };
 
+/**
+ * The API the dev server proxies to. Defaults to the conventional local port, so
+ * `npm run dev` is unchanged; override it to point a second front end at a
+ * second API (running both side by side is how a change gets compared against
+ * the version it replaces).
+ */
+const API_TARGET = process.env.API_PROXY_TARGET ?? "http://localhost:3000";
+
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: Number(process.env.WEB_PORT ?? 5173),
     proxy: {
-      "/v1": { target: "http://localhost:3000", changeOrigin: false, configure: passThroughSse },
-      "/webhooks": { target: "http://localhost:3000", changeOrigin: false },
+      "/v1": { target: API_TARGET, changeOrigin: false, configure: passThroughSse },
+      "/webhooks": { target: API_TARGET, changeOrigin: false },
     },
   },
   optimizeDeps: {

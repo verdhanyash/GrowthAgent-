@@ -28,3 +28,39 @@ export function humanMs(ms: number | null | undefined): string {
 export function bpsToPct(bps: number): string {
   return `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
 }
+
+/** Whole counts with thousands separators: 1284 → "1,284". */
+export function count(n: number): string {
+  return n.toLocaleString("en-IN");
+}
+
+/** Rupees, no paise tail — for figures where two decimals are noise. */
+export function rupeesShort(paise: number): string {
+  const r = paise / 100;
+  if (r >= 1e7) return `₹${(r / 1e7).toFixed(2)}Cr`;
+  if (r >= 1e5) return `₹${(r / 1e5).toFixed(2)}L`;
+  return `₹${Math.round(r).toLocaleString("en-IN")}`;
+}
+
+/** A percentage the API may not have been able to compute. */
+export function pctOrDash(v: number | null): string {
+  return v === null ? "—" : `${v}%`;
+}
+
+/**
+ * Bucket start → axis tick + full tooltip title, for the window's granularity.
+ * Hourly buckets show the clock; daily buckets show the date.
+ */
+export function bucketLabels(iso: string, bucket: "hour" | "day"): { short: string; full: string } {
+  const d = new Date(iso);
+  if (bucket === "hour") {
+    return {
+      short: d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false }),
+      full: d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }),
+    };
+  }
+  return {
+    short: d.toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+    full: d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }),
+  };
+}

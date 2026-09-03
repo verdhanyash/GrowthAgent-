@@ -1,49 +1,59 @@
 /**
- * StageTimeline — the vertical pipeline rail. One row per stage the audit log
- * announced (INTAKE→…→EXPLAIN), newest state folded by the reducer. A stage may
- * appear more than once (retries) — each StageView is its own row with its
- * attempt number. Status drives the left dot + chip; color is always paired
- * with a text label (§6).
+ * StageTimeline — the pipeline rail.
+ *
+ * One row per stage the audit log announced, in the order it announced them. A
+ * stage can appear twice (a retry gets its own row with its attempt number)
+ * because collapsing retries would hide the thing you opened the trace to see.
+ *
+ * This replaced a 3D WebGL graph of the same nine stages. The graph cost ~600KB
+ * of `three`, rendered decoratively on the old overview screen with no data
+ * bound to it at all, and answered no question this list does not.
+ *
+ * Status is never colour alone — every row carries the word.
  */
 import type { StageView, StageStatus } from "../hooks/traceReducer.js";
 import { humanMs } from "../lib/format.js";
 import { Chip, Empty } from "./ui.js";
 
 const DOT: Record<StageStatus, string> = {
-  RUNNING: "bg-accent motion-safe:animate-pulse",
+  RUNNING: "bg-ink motion-safe:animate-pulse",
   OK: "bg-ok",
-  DEGRADED: "bg-escalate",
+  DEGRADED: "bg-warn",
   FAILED: "bg-bad",
 };
 
-function statusChip(s: StageStatus): JSX.Element {
-  switch (s) {
-    case "RUNNING":
-      return <Chip tone="run">running</Chip>;
-    case "OK":
-      return <Chip tone="ok">ok</Chip>;
-    case "DEGRADED":
-      return <Chip tone="escalate">degraded</Chip>;
-    case "FAILED":
-      return <Chip tone="bad">failed</Chip>;
-  }
-}
+const CHIP: Record<StageStatus, { tone: "run" | "ok" | "warn" | "bad"; label: string }> = {
+  RUNNING: { tone: "run", label: "running" },
+  OK: { tone: "ok", label: "ok" },
+  DEGRADED: { tone: "warn", label: "degraded" },
+  FAILED: { tone: "bad", label: "failed" },
+};
 
 export function StageTimeline({ stages }: { stages: StageView[] }): JSX.Element {
-  if (stages.length === 0) return <Empty>Awaiting first stage…</Empty>;
+  if (stages.length === 0) return <Empty>Waiting for the first stage…</Empty>;
+
   return (
-    <ol className="relative ml-1 space-y-3 border-l border-edge pl-5">
+    <ol className="relative space-y-3 border-l border-edge pl-5">
       {stages.map((st, i) => (
         <li key={`${st.stage}-${st.attempt}-${i}`} className="relative">
-          <span className={`absolute -left-[26px] top-1 h-3 w-3 rounded-full ring-2 ring-panel ${DOT[st.status]}`} />
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[14px] font-semibold text-ink">{st.stage}</span>
-              {st.attempt > 1 && <span className="text-[11px] text-mute">attempt {st.attempt}</span>}
+          <span
+            aria-hidden
+            className={`absolute -left-[25px] top-1.5 h-2 w-2 rounded-full ring-4 ring-panel ${DOT[st.status]}`}
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-[12px] text-ink">{st.stage}</span>
+              {st.attempt > 1 && (
+                <span className="text-[11px] text-mute">attempt {st.attempt}</span>
+              )}
             </div>
-            <div className="flex items-center gap-2">
-              {st.durationMs !== null && <span className="text-[11px] text-mute">{humanMs(st.durationMs)}</span>}
-              {statusChip(st.status)}
+            <div className="flex items-center gap-3">
+              {st.durationMs !== null && (
+                <span className="text-[11px] tabular-nums text-mute">
+                  {humanMs(st.durationMs)}
+                </span>
+              )}
+              <Chip tone={CHIP[st.status].tone}>{CHIP[st.status].label}</Chip>
             </div>
           </div>
         </li>

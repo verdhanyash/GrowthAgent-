@@ -13,12 +13,18 @@
  */
 
 const AGENT_KEY_STORAGE = "growthagent.agentKey";
+const ADMIN_TOKEN_STORAGE = "growthagent.adminToken";
 
 /** Same-origin by default: Vite proxies /v1 + /webhooks to the API (:3000). */
 export const API_BASE = "";
 
 const seed =
   typeof import.meta.env.VITE_AGENT_KEY === "string" ? import.meta.env.VITE_AGENT_KEY : "";
+
+const adminSeed =
+  typeof import.meta.env.VITE_ADMIN_TOKEN === "string"
+    ? import.meta.env.VITE_ADMIN_TOKEN
+    : "ga-admin-token-test";
 
 export function getAgentKey(): string {
   try {
@@ -40,4 +46,26 @@ export function setAgentKey(key: string): void {
 
 export function hasAgentKey(): boolean {
   return getAgentKey() !== "";
+}
+
+export function getAdminToken(): string {
+  try {
+    const stored = window.localStorage.getItem(ADMIN_TOKEN_STORAGE);
+    if (stored !== null && stored.trim() !== "") return stored.trim();
+  } catch {
+    /* fallback to seed */
+  }
+  return adminSeed.trim();
+}
+
+export function setAdminToken(token: string): void {
+  try {
+    window.localStorage.setItem(ADMIN_TOKEN_STORAGE, token.trim());
+  } catch {
+    /* non-fatal */
+  }
+}
+
+export function hasAdminToken(): boolean {
+  return getAdminToken() !== "";
 }

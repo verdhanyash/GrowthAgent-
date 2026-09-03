@@ -47,6 +47,44 @@ export interface VelocityInput {
   readonly maxValuePerIdentityPerDayPaise: number;
 }
 
+/** The shape every hold path needs from a settlement line. */
+interface HoldLine {
+  readonly sku: string;
+  readonly qty: number;
+  /** Made-to-order line (gatekeeper's `backorder_allowed_skus` exemption).
+   *  No physical stock exists to hold, so NO inventory counter moves for it —
+   *  the hold row is written purely so release/commit/expiry can account for
+   *  the ordered units. Without this the gate would approve a backorder that
+   *  `stock_qty - reserved >= qty` then refuses at settle time. */
+  readonly backordered?: boolean | undefined;
+}
+
+/**
+ * Collapse a cart to ONE entry per SKU, in lexicographic order.
+ *
+ * Two reasons this is mandatory rather than defensive:
+ *  - `stock_reservations` is UNIQUE (tx_id, sku) (§7.1), so a cart carrying the
+ *    same SKU twice would raise a unique violation mid-transaction;
+ *  - `mintSettleable` legitimately emits TWO sub-lines for one SKU when the
+ *    approved net does not divide evenly by quantity (the paise-remainder
+ *    split), and both must land as a single hold of the summed quantity.
+ * The lexicographic order is the deadlock-elimination ordering (§7.2).
+ */
+export function aggregateHoldLines(lines: readonly HoldLine[]): { sku: string; qty: number; backordered: boolean }[] {
+  const bySku = new Map<string, { sku: string; qty: number; backordered: boolean }>();
+  for (const l of lines) {
+    const cur = bySku.get(l.sku);
+    if (cur === undefined) {
+      bySku.set(l.sku, { sku: l.sku, qty: l.qty, backordered: l.backordered === true });
+      continue;
+    }
+    cur.qty += l.qty;
+    // Sub-lines of one cart line always carry the same flag; OR is the safe read.
+    cur.backordered = cur.backordered || l.backordered === true;
+  }
+  return [...bySku.values()].sort((a, b) => a.sku.localeCompare(b.sku));
+}
+
 /**
  * Atomic multi-line reservation: the ENTIRE cart inside one database
  * transaction; any failure ROLLs BACK earlier lines (§7.2). The
@@ -57,7 +95,7 @@ export interface VelocityInput {
 export async function reserveCart(
   db: PgPool,
   txId: string,
-  lines: readonly SettlementLine[] | ReadonlyArray<{ sku: string; qty: number }>,
+  lines: readonly SettlementLine[] | readonly HoldLine[],
   ttlMs: number,
   now: Date,
   velocity?: VelocityInput,
@@ -66,8 +104,19 @@ export async function reserveCart(
   try {
     await client.query("BEGIN");
     const expiresAt = new Date(now.getTime() + ttlMs);
-    // Lexicographic SKU order: deadlock elimination (§7.2 / data-model-audit §2.14).
-    for (const line of [...lines].sort((a, b) => a.sku.localeCompare(b.sku))) {
+    // One entry per SKU, lexicographic: deadlock elimination (§7.2 /
+    // data-model-audit §2.14) AND the UNIQUE (tx_id, sku) contract.
+    for (const line of aggregateHoldLines(lines)) {
+      if (line.backordered) {
+        // Made-to-order: nothing on the shelf to hold, so no counter moves and
+        // no sellability guard. Recorded so release/commit see the units.
+        await client.query(
+          `INSERT INTO stock_reservations (tx_id, sku, qty, expires_at, backordered)
+           VALUES ($1, $2, $3, $4, true)`,
+          [txId, line.sku, line.qty, expiresAt],
+        );
+        continue;
+      }
       const r = await client.query(
         `UPDATE inventory
             SET reserved = reserved + $1, updated_at = now()
@@ -140,14 +189,15 @@ export async function reReserveExpiredHolds(
       `UPDATE stock_reservations
           SET status='ACTIVE', released_at=NULL, expires_at=$2, reserved_at=now()
         WHERE tx_id=$1 AND status IN ('EXPIRED','ACTIVE')
-        RETURNING sku, qty`,
+        RETURNING sku, qty, backordered`,
       [txId, new Date(now.getTime() + ttlMs)],
     );
     if ((rows.rowCount ?? 0) === 0) {
       await client.query("ROLLBACK");
       return false; // nothing to resurrect
     }
-    for (const row of rows.rows as { sku: string; qty: number }[]) {
+    for (const row of rows.rows as { sku: string; qty: number; backordered: boolean }[]) {
+      if (row.backordered) continue; // never held a counter; nothing to re-take
       const r = await client.query(
         `UPDATE inventory SET reserved = reserved + $1, updated_at = now()
           WHERE sku = $2 AND stock_qty - reserved >= $1`,
@@ -170,6 +220,14 @@ export async function reReserveExpiredHolds(
  * exactly one winner per row, so double-release is a noop by construction
  * (§7.3 point 4). `reason` distinguishes reserve-failure / payment-failed /
  * merchant-decline in the audit trail.
+ *
+ * ONE TRANSACTION, like reserveCart. The status flip and the counter
+ * decrements are the same fact stated twice; splitting them across pool
+ * connections (as this used to) meant a crash — or any error on a later
+ * line — left rows RELEASED (so no sweeper ever revisits them: the sweep keys
+ * on status='ACTIVE') while `inventory.reserved` stayed incremented. That is a
+ * PERMANENT phantom reservation: stock nobody can buy and nothing reclaims.
+ * Rolling back returns the holds to ACTIVE so the next release/sweep retries.
  */
 export async function releaseHolds(
   db: PgPool,
@@ -182,26 +240,41 @@ export async function releaseHolds(
     PAYMENT_FAILED: "RELEASED",
     MERCHANT_DECLINED: "RELEASED",
   } as const;
-  const rows = await db.query(
-    `UPDATE stock_reservations
-        SET status = $2, released_at = now()
-      WHERE tx_id = $1 AND status = 'ACTIVE'
-      RETURNING sku, qty`,
-    [txId, statusByReason[reason]],
-  );
+  const client = await db.connect();
   let released = 0;
-  for (const row of rows.rows as { sku: string; qty: number }[]) {
-    const dec = await db.query(
-      `UPDATE inventory SET reserved = reserved - $1, updated_at = now()
-        WHERE sku = $2 AND reserved >= $1`,
-      [row.qty, row.sku],
+  try {
+    await client.query("BEGIN");
+    const rows = await client.query(
+      `UPDATE stock_reservations
+          SET status = $2, released_at = now()
+        WHERE tx_id = $1 AND status = 'ACTIVE'
+        RETURNING sku, qty, backordered`,
+      [txId, statusByReason[reason]],
     );
-    if (dec.rowCount === 0) {
-      // Never silently corrupt counters: tripwire + rethrow policy handled by caller.
-      appendAudit(txId, actor, "invariant_violation_alert", { sku: row.sku, op: "release" });
-      throw new InvariantViolationError(txId, row.sku, "release");
+    for (const row of rows.rows as { sku: string; qty: number; backordered: boolean }[]) {
+      if (row.backordered) {
+        released += row.qty; // recorded units, but no counter ever moved
+        continue;
+      }
+      const dec = await client.query(
+        `UPDATE inventory SET reserved = reserved - $1, updated_at = now()
+          WHERE sku = $2 AND reserved >= $1`,
+        [row.qty, row.sku],
+      );
+      if (dec.rowCount === 0) {
+        // Never silently corrupt counters: tripwire, then abort the WHOLE
+        // release so the holds stay ACTIVE and reclaimable.
+        appendAudit(txId, actor, "invariant_violation_alert", { sku: row.sku, op: "release" });
+        throw new InvariantViolationError(txId, row.sku, "release");
+      }
+      released += row.qty;
     }
-    released += row.qty;
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw e;
+  } finally {
+    client.release();
   }
   if (released > 0) {
     appendAudit(txId, actor, "reservation.released", { units: released, reason });

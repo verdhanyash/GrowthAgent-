@@ -31,9 +31,18 @@ const price = (sku: string, paise: number): EvidencePackEntryInput => ({
   kind: "PRICE", sku, source_table: "products", computed_at: NOW_ISO,
   payload: { kind: "PRICE", payload: { label: sku, category_raw: "CAKES", list_price_paise: paise, cost_paise: Math.floor(paise / 2), currency: "INR" } },
 });
-const stock = (sku: string, available: number): EvidencePackEntryInput => ({
+const stock = (
+  sku: string,
+  available: number,
+  daysToExpiry: number | null = null,
+): EvidencePackEntryInput => ({
   kind: "STOCK", sku, source_table: "inventory", computed_at: NOW_ISO,
-  payload: { kind: "STOCK", payload: { qty_on_hand: available, reserved_qty: 0, available_qty: available, expires_on: null, days_to_expiry: null } },
+  payload: { kind: "STOCK", payload: { qty_on_hand: available, reserved_qty: 0, available_qty: available, expires_on: daysToExpiry === null ? null : "2026-08-27", days_to_expiry: daysToExpiry } },
+});
+
+const margin = (sku: string, pct: number, contribution: number): EvidencePackEntryInput => ({
+  kind: "MARGIN", sku, source_table: "products(cost)", computed_at: NOW_ISO,
+  payload: { kind: "MARGIN", payload: { margin_pct: pct, contribution_per_unit_paise: contribution } },
 });
 
 /* ------------------------------------------------------ §6.3 step 1–2 */
@@ -90,6 +99,60 @@ describe("step 2 — best-seller seed when nothing resolvable was requested", ()
       { sku: CHOC, qty: 1 },
       { sku: VAN, qty: 1 },
     ]);
+  });
+
+  it("seeds on MARGIN rank when the pack carries no SALES_STAT rows", () => {
+    // The real evidence builder emits PRICE/STOCK/MARGIN only — no sales
+    // aggregates — so this is the shape every live free-text request takes.
+    // Before the degraded rank existed it returned null and the cart declined
+    // as EMPTY_CART with a full shelf in stock.
+    const p = packOf([
+      price(CHOC, 64_900), // margin 50%, contribution 32_450
+      stock(CHOC, 4),
+      margin(CHOC, 50, 32_450),
+      price(VAN, 19_900), // richer margin — wins the rank
+      stock(VAN, 4),
+      margin(VAN, 62, 12_338),
+    ]);
+    const r = buildFallbackBundle(
+      { items: [{ label_free_text: "surprise me", qty: 1 }], channel: "AGENT" },
+      p,
+      [],
+    );
+    expect(r?.proposal.proposed_items).toEqual([{ sku: VAN, qty: 1 }]);
+  });
+
+  it("keeps the seed out of stock-outs and stays byte-stable across runs", () => {
+    const p = packOf([
+      price(CHOC, 64_900),
+      stock(CHOC, 0), // out of stock — must never be seeded
+      margin(CHOC, 90, 60_000), // …even though it is the richest line
+      price(VAN, 19_900),
+      stock(VAN, 2),
+      margin(VAN, 10, 2_000),
+    ]);
+    const req = { items: [{ label_free_text: "anything", qty: 1 }], channel: "AGENT" } as const;
+    const a = buildFallbackBundle(req, p, []);
+    const b = buildFallbackBundle(req, p, []);
+    expect(a?.proposal.proposed_items).toEqual([{ sku: VAN, qty: 1 }]);
+    expect(canonicalJson(a as never)).toEqual(canonicalJson(b as never));
+  });
+
+  it("never seeds a SKU past its sell_by — GK-EXPIRY-GUARD is a hard decline", () => {
+    const p = packOf([
+      price(CHOC, 64_900),
+      stock(CHOC, 25, -6), // richest line, but expired six days ago
+      margin(CHOC, 95, 60_000),
+      price(VAN, 19_900),
+      stock(VAN, 4, 3), // near-expiry still sells — that is the campaign system's job
+      margin(VAN, 10, 2_000),
+    ]);
+    const r = buildFallbackBundle(
+      { items: [{ label_free_text: "surprise me", qty: 1 }], channel: "AGENT" },
+      p,
+      [],
+    );
+    expect(r?.proposal.proposed_items).toEqual([{ sku: VAN, qty: 1 }]);
   });
 
   it("returns null when NOTHING is sellable → polite-decline path", () => {

@@ -75,15 +75,25 @@ export async function authenticateAgent(db: PgPool, req: Request): Promise<Agent
 /**
  * Middleware: authenticate, then (optionally) require a role. Attaches
  * `req.agent`. A wrong role for an authenticated agent is 403 FORBIDDEN.
+ *
+ * `onFailure` is the seam the failed-authentication limiter hangs off (audit
+ * 8.2): rejections are what a key brute-forcer produces, and they are the only
+ * traffic that should cost a source anything.
  */
-export function requireAgent(db: PgPool, role?: AgentIdentity["role"]): RequestHandler {
+export function requireAgent(
+  db: PgPool,
+  role?: AgentIdentity["role"],
+  opts: { readonly onFailure?: (req: Request) => void } = {},
+): RequestHandler {
   return (req, _res, next) => {
     void authenticateAgent(db, req).then((result) => {
       if (result instanceof HttpError) {
+        opts.onFailure?.(req);
         next(result);
         return;
       }
       if (role !== undefined && result.role !== role) {
+        opts.onFailure?.(req);
         next(new HttpError(403, "FORBIDDEN", "agent role not permitted on this route", { retryable: false }));
         return;
       }

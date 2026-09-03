@@ -6,7 +6,8 @@
  * heavier runner would be ceremony at this scale.
  */
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 export type PgPool = pg.Pool;
@@ -23,6 +24,29 @@ export function createPool(databaseUrl = process.env.DATABASE_URL ?? DEFAULT_DAT
 }
 
 const MIGRATION_NAME_RE = /^V\d+__.+\.sql$/;
+
+/**
+ * Turn a "Postgres isn't there" failure into an instruction (audit 14.1).
+ *
+ * The DB-backed suites are the ones that cover settlement, the audit chain and
+ * the pipeline; a bare `ECONNREFUSED 127.0.0.1:15432` in a `beforeAll` reads as
+ * "some infra flake" and invites re-running until it's ignored, while the
+ * pure-`shared` suites stay green and make CI look fine. Naming the fix in the
+ * message is the difference between a skipped signal and a fixed environment.
+ */
+function withConnectionHint(e: unknown): Error {
+  const err = e instanceof Error ? e : new Error(String(e));
+  const code = (e as { code?: string } | null)?.code;
+  if (code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ETIMEDOUT") {
+    return new Error(
+      `cannot reach Postgres (${err.message}). The DB-backed suites and the demo BOTH need it: ` +
+        `start it with \`npm run db:up\` (docker compose, host port 15432), or point DATABASE_URL ` +
+        `at your own instance. A green run without it only proves the pure-shared tests passed.`,
+      { cause: err },
+    );
+  }
+  return err;
+}
 
 async function ensureRegistry(db: PgPool | PgClient): Promise<void> {
   await db.query(
@@ -52,12 +76,32 @@ export function sortMigrationFiles(files: readonly string[]): string[] {
     .sort((a, b) => migrationVersion(a) - migrationVersion(b) || a.localeCompare(b));
 }
 
+/**
+ * Where the migrations live, resolved from THIS MODULE rather than the process
+ * working directory (audit 10.5 / 18.2). `join(process.cwd(), "migrations")`
+ * meant `npx tsx api/src/server.ts` from the repo root died on
+ * `ENOENT … scandir '<repo>/migrations'` — the server booted only when launched
+ * from inside `api/`. Both layouts land on `api/migrations`:
+ *   src/db/client.ts  → ../../migrations
+ *   dist/db/client.js → ../../migrations
+ * MIGRATIONS_DIR overrides it for anything exotic.
+ */
+export function defaultMigrationsDir(): string {
+  const fromEnv = process.env.MIGRATIONS_DIR;
+  if (fromEnv !== undefined && fromEnv.trim() !== "") return resolve(fromEnv);
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
+}
+
 /** Apply every not-yet-applied V*.sql in VERSION order, one transaction each. */
 export async function applyMigrations(
   db: PgPool,
-  dir = join(process.cwd(), "migrations"),
+  dir = defaultMigrationsDir(),
 ): Promise<string[]> {
-  await ensureRegistry(db);
+  try {
+    await ensureRegistry(db);
+  } catch (e) {
+    throw withConnectionHint(e);
+  }
   const files = sortMigrationFiles(await readdir(dir));
   const applied: string[] = [];
   for (const file of files) {

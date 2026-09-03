@@ -62,7 +62,7 @@ export interface SettlementRoutesDeps {
 export function webhookRoute(deps: WebhookHandlerDeps): Router {
   const router = express.Router();
   router.post(
-    "/webhooks/razorpay",
+    ["/webhooks/razorpay", "/v1/webhooks/razorpay"],
     express.raw({
       type: () => true, // accept whatever content-type arrives; we parse ourselves
       limit: "256kb",

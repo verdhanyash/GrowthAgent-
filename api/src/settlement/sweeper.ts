@@ -61,23 +61,45 @@ export async function sweepExpiredReservations(db: PgPool): Promise<string[]> {
   return ids;
 }
 
-/** Pass 2 standalone: releases by reservation-table scan alone (W8). */
+/**
+ * Pass 2 standalone: releases by reservation-table scan alone (W8).
+ *
+ * ONE statement, therefore one implicit transaction: the status flip and the
+ * matching `inventory.reserved` decrements commit together or not at all. The
+ * previous shape flipped every row to EXPIRED on the pool and THEN decremented
+ * counters one query at a time — a crash in that window left rows the sweep
+ * never revisits (it keys on status='ACTIVE') with the counters still held, a
+ * permanent phantom reservation. Backordered holds never took a counter, so
+ * they are excluded from the decrement but still expire.
+ *
+ * A SKU whose decrement guard (`reserved >= qty`) fails was ALREADY corrupt
+ * before this sweep; those rows come back ok=false and raise the §7.4
+ * belt-and-braces alert instead of silently moving counters negative.
+ */
 export async function releaseExpiredHolds(db: PgPool): Promise<number> {
   const rows = await db.query(
-    `UPDATE stock_reservations SET status='EXPIRED', released_at=now()
-      WHERE status='ACTIVE' AND expires_at < now()
-      RETURNING reservation_id, sku, qty`,
+    `WITH claimed AS (
+       UPDATE stock_reservations SET status='EXPIRED', released_at=now()
+        WHERE status='ACTIVE' AND expires_at < now()
+       RETURNING tx_id, sku, qty, backordered
+     ), totals AS (
+       SELECT sku, SUM(qty)::int AS qty FROM claimed WHERE backordered = false GROUP BY sku
+     ), decremented AS (
+       UPDATE inventory i SET reserved = i.reserved - t.qty, updated_at = now()
+         FROM totals t
+        WHERE i.sku = t.sku AND i.reserved >= t.qty
+       RETURNING i.sku
+     )
+     SELECT c.tx_id, c.sku, c.qty, c.backordered,
+            (c.backordered OR d.sku IS NOT NULL) AS ok
+       FROM claimed c LEFT JOIN decremented d ON d.sku = c.sku`,
   );
   let units = 0;
-  for (const row of rows.rows as { sku: string; qty: number }[]) {
-    const r = await db.query(
-      `UPDATE inventory SET reserved = reserved - $1, updated_at=now()
-        WHERE sku=$2 AND reserved >= $1`,
-      [row.qty, row.sku],
-    );
-    if ((r.rowCount ?? 0) === 0) {
-      // Belt-and-braces tripwire (§7.4): counters already moved — alert, never throw away.
-      appendAudit("-", "settlement.sweeper", "invariant_violation_alert", {
+  for (const row of rows.rows as { tx_id: string; sku: string; qty: number; ok: boolean }[]) {
+    if (!row.ok) {
+      // Belt-and-braces tripwire (§7.4): counters were already wrong — alert,
+      // never throw the whole sweep away.
+      appendAudit(row.tx_id, "settlement.sweeper", "invariant_violation_alert", {
         sku: row.sku,
         op: "expired_release",
       });

@@ -13,6 +13,7 @@ import type { Request, Response } from "express";
 import {
   canonicalJson,
   digestView,
+  parsePaiseExact,
   type SettleableProposal,
   type TxState,
 } from "@growthagent/shared";
@@ -44,8 +45,9 @@ interface TxJoinRow {
   tx_id: string;
   state: string;
   /** Matches the SELECT alias below — a cast cannot paper over a key that
-   *  isn't there at runtime (that bug signed every capture as a mismatch). */
-  approved_total_paise: number;
+   *  isn't there at runtime (that bug signed every capture as a mismatch).
+   *  BIGINT column: node-pg hands it over as a string. */
+  approved_total_paise: string | number;
   proposal_bytes: unknown;
   proposal_sha256: string;
   receipt: string;
@@ -198,14 +200,18 @@ async function onCapture(
   // convention: PG JSONB does not preserve key order, so byte-equality is
   // asserted over the CANONICAL form — the same form settle() hashed at T1.
   // NOTE: approved_total_paise is BIGINT ⇒ node-pg yields a STRING; compare
-  // numerically or every honest capture reads as a mismatch.
-  const expectedPaise = Number(tx.approved_total_paise);
+  // numerically or every honest capture reads as a mismatch. parsePaiseExact
+  // refuses anything that would not survive the round trip instead of letting
+  // Number() round it (audit 10.3) — an unparseable amount is a MISMATCH, so
+  // the money goes to human review rather than through an approximate compare.
+  const expectedPaise = parsePaiseExact(tx.approved_total_paise);
   const frozenBytesOk =
     createHash("sha256")
       .update(canonicalJson(digestView(tx.proposal_bytes as SettleableProposal)), "utf8")
       .digest("hex") === tx.proposal_sha256;
   const providerMismatch = tx.provider_kind !== provider.kind;
   const mismatch =
+    expectedPaise === null ||
     pay.amount !== expectedPaise ||
     pay.currency !== "INR" ||
     (ord !== null && ord.receipt !== tx.receipt) ||

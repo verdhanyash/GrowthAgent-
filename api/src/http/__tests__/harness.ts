@@ -8,7 +8,7 @@
  * real stage, gatekeeper, and settlement write.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any -- test harness deals in loosely-typed JSON response bodies */
-import { MEERA_GT_V1, MEERA_RULES_V3, type CampaignPriorityPayload } from "@growthagent/shared";
+import { MEERA_GT_V1, type CampaignPriorityPayload, type MerchantRulesConfig } from "@growthagent/shared";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { applyMigrations, createPool, type PgPool } from "../../db/client.js";
@@ -16,6 +16,8 @@ import { AuditChain } from "../../pipeline/audit-chain.js";
 import { TraceBus } from "../../pipeline/bus.js";
 import { PipelineEmitter } from "../../pipeline/emitter.js";
 import { runPipeline, resumeAfterApproval, rejectAfterRejection, type PipelineDeps, type RunInput, type ResolveDeps } from "../../pipeline/orchestrator.js";
+import { failRunNow } from "../../pipeline/stall-sweeper.js";
+import { RulesStore } from "../../rules/store.js";
 import { SystemClock } from "../../settlement/clock.js";
 import { loadSettlementConfig } from "../../settlement/config.js";
 import { MockProvider } from "../../settlement/provider/mock.provider.js";
@@ -23,6 +25,7 @@ import type { NegotiationTransport } from "../../negotiation/transport.types.js"
 import { buildApiApp } from "../app.js";
 import { buildCartMandate, DEV_MERCHANT_SIGNING_SECRET } from "../mandate-builder.js";
 import { sha256Hex } from "../crypto.js";
+import { ChaosController } from "../chaos-controller.js";
 
 export const TICKET_SECRET = "ga-stream-ticket-secret-test";
 export const RULES_VERSION = 3;
@@ -38,6 +41,7 @@ export interface ApiHarness {
   readonly db: PgPool;
   readonly bus: TraceBus;
   readonly chain: AuditChain;
+  readonly chaos: ChaosController;
   close(): Promise<void>;
 }
 
@@ -66,7 +70,7 @@ async function truncate(db: PgPool): Promise<void> {
   await db.query(`TRUNCATE audit_log, proposal_txs, approvals, proposal_idempotency, cart_mandates,
                            transactions, stock_reservations, inventory, identity_velocity,
                            razorpay_orders, processed_webhook_events, completed_sales,
-                           idempotency_keys, agent_identities CASCADE`);
+                           idempotency_keys, agent_identities, merchant_rules CASCADE`);
 }
 
 export interface ApiOverrides {
@@ -74,6 +78,12 @@ export interface ApiOverrides {
   readonly velocity?: PipelineDeps["velocity"];
   readonly heartbeatMs?: number;
   readonly terminalPollMs?: number;
+  /** Transport-layer knobs the audit-remediation specs drive (H5, 9.3, 8.4). */
+  readonly rateLimit?: { readonly capacity: number; readonly refillPerSec: number };
+  readonly authFailureLimit?: { readonly maxFailures: number; readonly refillPerSec: number };
+  readonly maxStreams?: number;
+  readonly maxStreamsPerAgent?: number;
+  readonly allowedOrigins?: readonly string[];
 }
 
 export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
@@ -84,11 +94,18 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
   await seedAgents(db);
   await seedInventory(db);
 
+  // Rules read THROUGH Postgres, same as server.ts. ttlMs:0 makes every gate
+  // entry re-read, so a test that PUTs rules sees the change on the next run
+  // without sleeping past a cache window.
+  const rulesStore = new RulesStore(db, { ttlMs: 0 });
+  await rulesStore.boot();
+
   const chain = new AuditChain(db);
   await chain.boot();
   const bus = new TraceBus();
-  const emitter = new PipelineEmitter(chain, bus, () => RULES_VERSION);
+  const emitter = new PipelineEmitter(chain, bus, () => rulesStore.version());
   const clock = new SystemClock();
+  const chaos = new ChaosController(() => clock.nowMs());
   const settleConfig = loadSettlementConfig({ RAZORPAY_PROVIDER: "MOCK" });
   const provider = new MockProvider({ webhookSecret: settleConfig.webhookSecrets[0]!, clock });
 
@@ -101,7 +118,7 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
     narrator: undefined,
     groundTruth: async () => MEERA_GT_V1,
     priorities: async (): Promise<readonly CampaignPriorityPayload[]> => [],
-    rules: () => MEERA_RULES_V3,
+    rules: () => rulesStore.load(),
     velocity: overrides.velocity,
     provider,
     settleConfig,
@@ -116,10 +133,11 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
     bus,
     chain,
     nowMs: () => clock.nowMs(),
-    rulesVersion: () => RULES_VERSION,
+    rulesVersion: () => rulesStore.version(),
     enqueue: (input: RunInput) => {
       void runPipeline(pipelineDeps, input).catch((err) => {
         console.error(`[test-api] pipeline failed for ${input.tx_id}:`, err instanceof Error ? err.message : err);
+        void failRunNow(db, input.tx_id, { reason: "PIPELINE_ERROR", retryable: true }).catch(() => undefined);
       });
     },
     buildMandate: (txId: string) =>
@@ -134,17 +152,27 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
     adminToken: ADMIN_TOKEN,
     allowInsecureAdmin: false,
     resumeApproval: (a) => {
-      void resumeAfterApproval(resolveDeps, a).catch((err) =>
-        console.error(`[test-api] resume failed for ${a.approval_id}:`, err instanceof Error ? err.message : err),
-      );
+      return resumeAfterApproval(resolveDeps, a).catch((err) => {
+        console.error(`[test-api] resume failed for ${a.approval_id}:`, err instanceof Error ? err.message : err);
+        return { already: false };
+      });
     },
     rejectApproval: (a) => {
-      void rejectAfterRejection(resolveDeps, a).catch((err) =>
-        console.error(`[test-api] reject failed for ${a.approval_id}:`, err instanceof Error ? err.message : err),
-      );
+      return rejectAfterRejection(resolveDeps, a).catch((err) => {
+        console.error(`[test-api] reject failed for ${a.approval_id}:`, err instanceof Error ? err.message : err);
+        return { already: false };
+      });
     },
+    getCurrentRules: () => rulesStore.load(),
+    onRulesUpdated: (newRules: MerchantRulesConfig) => { rulesStore.set(newRules); },
+    chaos,
     heartbeatMs: overrides.heartbeatMs,
     terminalPollMs: overrides.terminalPollMs ?? 100,
+    rateLimit: overrides.rateLimit,
+    authFailureLimit: overrides.authFailureLimit,
+    maxStreams: overrides.maxStreams,
+    maxStreamsPerAgent: overrides.maxStreamsPerAgent,
+    allowedOrigins: overrides.allowedOrigins,
   });
 
   const server: Server = await new Promise((resolve) => {
@@ -157,6 +185,7 @@ export async function startApi(overrides: ApiOverrides): Promise<ApiHarness> {
     db,
     bus,
     chain,
+    chaos,
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await db.end();
@@ -244,6 +273,38 @@ export async function adminPost(
     method: "POST",
     headers,
     body: JSON.stringify(body),
+  });
+  return { status: res.status, json: await res.json() };
+}
+
+/** Admin PUT with a JSON body and an (optional) X-Admin-Token. */
+export async function adminPut(
+  base: string,
+  path: string,
+  body: unknown = {},
+  token: string | null = ADMIN_TOKEN,
+): Promise<{ status: number; json: any }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token !== null) headers["X-Admin-Token"] = token;
+  const res = await fetch(`${base}${path}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, json: await res.json() };
+}
+
+/** Admin DELETE with an (optional) X-Admin-Token. */
+export async function adminDelete(
+  base: string,
+  path: string,
+  token: string | null = ADMIN_TOKEN,
+): Promise<{ status: number; json: any }> {
+  const headers: Record<string, string> = {};
+  if (token !== null) headers["X-Admin-Token"] = token;
+  const res = await fetch(`${base}${path}`, {
+    method: "DELETE",
+    headers,
   });
   return { status: res.status, json: await res.json() };
 }

@@ -1,11 +1,26 @@
 /**
  * Deterministic heuristic injection tagger (api-contract.md §5.1 QUARANTINE
  * ZONE note, frontend-events.md InjectionFlagged payload). ZERO LLM trust —
- * plain regexes over the raw customer note, run at INTAKE before any model
- * sees the text. Output feeds three consumers:
+ * plain regexes over the customer note, run at INTAKE before any model sees the
+ * text. Output feeds three consumers:
  *   - the gatekeeper's InjectionSignal input (injectionGuard / repeatOffender),
  *   - the negotiation stage's NoteHeuristicTags (disclosed to the model),
  *   - the injection_flagged SSE event.
+ *
+ * v2 — EVASION FOLDING (audit §2). A regex list over raw bytes is trivially
+ * side-stepped. "system note" with a U+200B zero-width space wedged inside it,
+ * a Cyrillic-lookalike spelling, the fullwidth forms, and "EMPLOYEE" written with
+ * fullwidth digits all read as the attack to a language model and as innocent
+ * text to `/\bsystem\s*note\b/i`.
+ * So every note is scanned TWICE: once as sent, and once through `foldEvasions`
+ * (NFKC → drop zero-width/invisible → map homoglyphs → collapse spacing). A hit
+ * in either pass counts, and folded hits are marked so the trace says which
+ * pass caught it.
+ *
+ * This is still a HEURISTIC SPEED-BUMP, not a security boundary — semantic
+ * paraphrase in any language will always get past a pattern list. The hard
+ * backstop is the gatekeeper's arithmetic (discount cap, margin floor, cart
+ * cap, totals drift), which does not read the note at all.
  *
  * Pure and versioned: tagger_version rides in every signal so audit trails
  * stay interpretable when the pattern list evolves.
@@ -13,7 +28,7 @@
 import type { InjectionSignal } from "@growthagent/shared";
 import type { NoteHeuristicTags } from "@growthagent/shared";
 
-export const TAGGER_VERSION = "heuristic-v1";
+export const TAGGER_VERSION = "heuristic-v2";
 
 interface Pattern {
   readonly id: string;
@@ -55,6 +70,55 @@ const PATTERNS: readonly Pattern[] = [
   },
 ];
 
+/**
+ * Characters that carry no glyph but break every `\b`-anchored pattern:
+ * zero-width space/non-joiner/joiner, LRM/RLM and friends, word joiner,
+ * invisible separator/times/plus, BOM, and the soft hyphen.
+ */
+const INVISIBLE_RE =
+  /[\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u206a-\u206f\ufeff]/g;
+
+/**
+ * Homoglyph folding table: Cyrillic and Greek letters that render (near-)
+ * identically to Latin ones, plus the Cherokee/mathematical lookalikes that
+ * show up in real evasion attempts. NFKC does NOT fold these — they are
+ * distinct letters, not compatibility variants — so the mapping is explicit.
+ */
+const HOMOGLYPHS: Readonly<Record<string, string>> = {
+  "А": "A", "В": "B", "С": "C", "Е": "E", "Н": "H",
+  "К": "K", "М": "M", "О": "O", "Р": "P", "Т": "T",
+  "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S",
+  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c",
+  "у": "y", "х": "x", "і": "i", "ѕ": "s", "н": "h",
+  "Α": "A", "Β": "B", "Ε": "E", "Η": "H", "Ι": "I",
+  "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P",
+  "Τ": "T", "Υ": "Y", "Χ": "X",
+  "α": "a", "ε": "e", "ι": "i", "ο": "o", "ρ": "p",
+  "υ": "u", "ν": "v", "χ": "x",
+  "Ꭰ": "D", "Ꭺ": "H", "Ꮐ": "G", "Ꮮ": "P",
+  "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-",
+  "‘": "'", "’": "'", "“": '"', "”": '"',
+};
+
+/**
+ * Collapse the cheap ways to hide a pattern from a regex, WITHOUT changing what
+ * a human or a model reads:
+ *   1. NFKC — fullwidth/ligature/superscript forms become their ASCII base, and
+ *      NBSP becomes a normal space;
+ *   2. drop invisible characters;
+ *   3. map homoglyphs to their Latin twins;
+ *   4. squeeze runs of whitespace and punctuation-as-separator to one space, so
+ *      "system  .  note" and "system note" fold together.
+ * Exported for tests and for anyone auditing what "folded" means.
+ */
+export function foldEvasions(note: string): string {
+  return note
+    .normalize("NFKC")
+    .replace(INVISIBLE_RE, "")
+    .replace(/[^\u0000-\u007f]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
+    .replace(/[\s\u00a0]+/g, " ");
+}
+
 /** Trimmed match snippets for the UI's red banner (max 160 chars each). */
 function snippetOf(note: string, m: RegExpExecArray): string {
   const start = Math.max(0, m.index - 20);
@@ -70,12 +134,24 @@ export interface TaggerOutput {
 
 /** Scan one customer note. Deterministic: same bytes ⇒ same output forever. */
 export function scanCustomerNote(note: string): TaggerOutput {
-  const hits: { pattern_id: string; snippet: string }[] = [];
+  const folded = foldEvasions(note);
+  const hits: { pattern_id: string; snippet: string; normalized?: boolean }[] = [];
   let risk = 0;
   for (const p of PATTERNS) {
-    const m = p.re.exec(note);
-    if (m !== null) {
-      hits.push({ pattern_id: p.id, snippet: snippetOf(note, m) });
+    // Raw first so an honest note reports the bytes the customer actually sent;
+    // the folded pass only speaks up when the raw pass missed.
+    const direct = p.re.exec(note);
+    if (direct !== null) {
+      hits.push({ pattern_id: p.id, snippet: snippetOf(note, direct) });
+      risk += p.weight;
+      continue;
+    }
+    if (folded === note) continue; // nothing was folded: no second chance to take
+    const evasive = p.re.exec(folded);
+    if (evasive !== null) {
+      // Snippet comes from the FOLDED text (its indices are the folded ones) and
+      // is flagged, so the trace never implies the customer typed these bytes.
+      hits.push({ pattern_id: p.id, snippet: snippetOf(folded, evasive), normalized: true });
       risk += p.weight;
     }
   }

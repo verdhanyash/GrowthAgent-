@@ -35,7 +35,16 @@ export interface StreamRoutesDeps {
   readonly ticketSecret: string;
   readonly heartbeatMs?: number | undefined;
   readonly terminalPollMs?: number | undefined;
+  /** Concurrent SSE ceiling for the whole process (audit 9.3). */
+  readonly maxStreams?: number | undefined;
+  /** Concurrent SSE ceiling per authenticated agent (audit 9.3). */
+  readonly maxStreamsPerAgent?: number | undefined;
 }
+
+/** Defaults sized for the demo: generous for a dashboard, far below the point
+ *  where per-connection heartbeat + terminal-poll timers saturate the pool. */
+export const DEFAULT_MAX_STREAMS = 100;
+export const DEFAULT_MAX_STREAMS_PER_AGENT = 8;
 
 /** True once the tx has a recorded terminal outcome (poll close condition). */
 async function isTerminal(db: PgPool, txId: string): Promise<boolean> {
@@ -74,6 +83,16 @@ export function streamRoutes(deps: StreamRoutesDeps): Router {
   const router = express.Router();
   const heartbeatMs = deps.heartbeatMs ?? 15_000;
   const terminalPollMs = deps.terminalPollMs ?? 1_000;
+  const maxStreams = deps.maxStreams ?? DEFAULT_MAX_STREAMS;
+  const maxPerAgent = deps.maxStreamsPerAgent ?? DEFAULT_MAX_STREAMS_PER_AGENT;
+  // Concurrency ledger (audit 9.3). Every live SSE connection costs a heartbeat
+  // timer, a terminal-poll timer and a Postgres round trip per poll tick; with
+  // no ceiling, a client opening connections in a loop starves the 10-connection
+  // pool and the event loop long before any bandwidth limit bites. Counted here
+  // rather than in the token bucket because the cost is CONCURRENCY, not rate:
+  // one connection held open for an hour is the expensive case.
+  let openStreams = 0;
+  const openPerAgent = new Map<string, number>();
 
   // Browser prep: mint a short-lived ticket for an owned tx (X-Agent-Key auth).
   router.post(
@@ -105,7 +124,36 @@ export function streamRoutes(deps: StreamRoutesDeps): Router {
     if (!(await ownsTx(deps.db, txId, agentId))) {
       throw new HttpError(404, "TX_NOT_FOUND", "no such transaction for this agent", { txId, retryable: false });
     }
-    await runSseStream(deps, req, res, txId, heartbeatMs, terminalPollMs);
+    // Admission control BEFORE the first SSE byte, so a refusal is an ordinary
+    // JSON 429 (EventSource surfaces it as onerror) rather than a half-open
+    // stream that looks alive to the client.
+    const mine = openPerAgent.get(agentId) ?? 0;
+    if (openStreams >= maxStreams || mine >= maxPerAgent) {
+      throw new HttpError(429, "RATE_LIMITED_HTTP", "too many concurrent streams — close one and retry", {
+        retryable: true,
+        details: { open_streams: openStreams, open_for_agent: mine, max_streams: maxStreams, max_per_agent: maxPerAgent },
+      });
+    }
+    openStreams += 1;
+    openPerAgent.set(agentId, mine + 1);
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      openStreams -= 1;
+      const left = (openPerAgent.get(agentId) ?? 1) - 1;
+      if (left <= 0) openPerAgent.delete(agentId);
+      else openPerAgent.set(agentId, left);
+    };
+    // The socket outlives this handler (runSseStream returns once the timers are
+    // armed), so the ledger is released on close, not on return.
+    res.on("close", release);
+    try {
+      await runSseStream(deps, req, res, txId, heartbeatMs, terminalPollMs);
+    } catch (e) {
+      release();
+      throw e;
+    }
   }));
 
   return router;

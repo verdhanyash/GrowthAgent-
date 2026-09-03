@@ -17,8 +17,10 @@ import {
 } from "@growthagent/shared";
 import { createHash } from "node:crypto";
 import type { AuditSink, AuditEvent } from "../audit/writer.js";
-import { AuditChain, type AuditRow, type ChainActor } from "./audit-chain.js";
-import { ADMIN_CHANNEL, TraceBus, txChannel } from "./bus.js";
+import type { AuditChain} from "./audit-chain.js";
+import { type AuditRow, type ChainActor } from "./audit-chain.js";
+import type { TraceBus} from "./bus.js";
+import { ADMIN_CHANNEL, txChannel } from "./bus.js";
 
 /** Events the RulesScreen inbox / admin stream care about (§1.5 admin-only
  *  note + escalation lifecycle). */
@@ -137,7 +139,7 @@ export class ChainedAuditSink implements AuditSink {
       })
       .catch((err) => {
         // Never route through the sink again (it IS us): log and move on.
-        // eslint-disable-next-line no-console
+         
         console.error(
           `[audit-chain] persist failed for ${event.event}:`,
           err instanceof Error ? err.message : String(err),

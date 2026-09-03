@@ -1,70 +1,79 @@
 /**
- * AgentKeyGate — the runtime agent-key field. Per the confirmed demo posture the
- * key is NOT baked into the build; it lives in localStorage (config.ts) and is
- * entered here at runtime. We show the visible-client-side caveat honestly. When
- * a key is present, children render; otherwise the gate blocks the buyer surface.
+ * web/src/components/AgentKeyGate.tsx — the one-time key prompt.
+ *
+ * The browser must present an X-Agent-Key to POST proposals and to mint stream
+ * tickets. There is no login to build here: the key IS the credential, it lives
+ * in localStorage, and once set the gate disappears for good rather than
+ * decorating every screen with a banner about it.
  */
 import { useState } from "react";
 import { getAgentKey, hasAgentKey, setAgentKey } from "../lib/config.js";
-import { Panel } from "./ui.js";
+import { Button, Field, inputClass } from "./ui.js";
+
+/** The seeded demo identities, so a fresh box needs no copy-paste from docs. */
+const SUGGESTED = [
+  { key: "gak_buyer_test_key_0001", label: "Test buyer" },
+  { key: "gak_polite_demo_key_0001", label: "Polite buyer" },
+] as const;
 
 export function AgentKeyGate({ children }: { children: React.ReactNode }): JSX.Element {
   const [key, setKey] = useState(getAgentKey);
-  const [saved, setSaved] = useState(hasAgentKey);
+  const [ready, setReady] = useState(hasAgentKey);
 
-  if (saved) {
-    return (
-      <div>
-        <div className="mb-4 flex items-center justify-between rounded border border-edge bg-panel px-3 py-2 text-[12px]">
-          <span className="text-mute">agent key: <span className="font-mono text-ok">•••• configured</span></span>
-          <button
-            type="button"
-            onClick={() => {
-              setAgentKey("");
-              setKey("");
-              setSaved(false);
-            }}
-            className="rounded px-2 py-0.5 text-mute hover:bg-edge focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            change
-          </button>
-        </div>
-        {children}
-      </div>
-    );
-  }
+  if (ready) return <>{children}</>;
+
+  const commit = (k: string): void => {
+    if (k.trim() === "") return;
+    setAgentKey(k.trim());
+    setReady(true);
+  };
 
   return (
-    <div className="mx-auto max-w-md pt-16">
-      <Panel title="Agent key required">
-        <p className="text-[13px] text-mute">
-          This buyer surface authenticates every call with <span className="font-mono text-ink/90">X-Agent-Key</span>. Paste a
-          <span className="font-mono text-ink/90"> buyer_agent</span> key to continue.
-        </p>
-        <form
-          className="mt-3 flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (key.trim() === "") return;
-            setAgentKey(key.trim());
-            setSaved(true);
-          }}
-        >
+    <div className="mx-auto max-w-sm pt-20">
+      <h1 className="text-[18px] font-semibold tracking-tight text-ink">Connect an agent key</h1>
+      <p className="mt-1.5 text-[12px] leading-relaxed text-mute">
+        Requests to the control plane are authenticated per agent. The key is kept in this
+        browser only — use a disposable test-mode key.
+      </p>
+
+      <form
+        className="mt-6 space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          commit(key);
+        }}
+      >
+        <Field label="Agent key">
           <input
-            type="password"
+            type="text"
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="agent key"
-            className="flex-1 rounded border border-edge bg-bg px-3 py-2 font-mono text-[13px] text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            placeholder="gak_…"
+            autoComplete="off"
+            className={`${inputClass} font-mono`}
           />
-          <button type="submit" className="rounded bg-accent/20 px-4 py-2 text-[13px] font-semibold text-accent hover:bg-accent/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-            Use key
+        </Field>
+        <Button variant="primary" type="submit" className="w-full">
+          Connect
+        </Button>
+      </form>
+
+      <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-edge pt-4">
+        <span className="text-[11px] text-mute">Seeded:</span>
+        {SUGGESTED.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => {
+              setKey(s.key);
+              commit(s.key);
+            }}
+            className="rounded-md border border-edge px-2 py-1 text-[11px] text-ink-muted transition-colors hover:border-edge-bright hover:text-ink"
+          >
+            {s.label}
           </button>
-        </form>
-        <p className="mt-3 text-[11px] text-warn/90">
-          ⚠ Demo posture: the key is stored in this browser's localStorage and is visible client-side. Do not use a production secret.
-        </p>
-      </Panel>
+        ))}
+      </div>
     </div>
   );
 }

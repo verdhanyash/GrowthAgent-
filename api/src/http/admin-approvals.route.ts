@@ -60,6 +60,26 @@ interface InboxRow {
   rules_version: number | null;
 }
 
+/**
+ * Strip the single-use settlement credential out of the frozen proposal before
+ * it leaves the process.
+ *
+ * `frozen_proposal` is the COMPLETE SettleableProposal, and it embeds
+ * `approval_token` — the one-shot credential settle() consumes. The inbox is
+ * admin-gated, but a reviewer's browser is still the least trustworthy place
+ * that token could sit, and the reviewer never needs it: approving goes through
+ * POST /approve, which reads the token server-side from the same row. So the
+ * response carries the cart, not the key to spend it.
+ *
+ * Deliberately a shallow copy of the top level only — the token lives there, and
+ * a deep walk would risk silently dropping a nested field the UI does render.
+ */
+function withoutApprovalToken(frozen: unknown): unknown {
+  if (frozen === null || typeof frozen !== "object" || Array.isArray(frozen)) return frozen;
+  const { approval_token: _redacted, ...rest } = frozen as Record<string, unknown>;
+  return rest;
+}
+
 export function adminApprovalRoutes(deps: AdminApprovalRoutesDeps): Router {
   const router = express.Router();
 
@@ -88,7 +108,7 @@ export function adminApprovalRoutes(deps: AdminApprovalRoutesDeps): Router {
           tx_id: row.tx_id,
           reason: row.reason,
           band_context: row.band_context,
-          proposed_cart_snapshot: row.frozen_proposal,
+          proposed_cart_snapshot: withoutApprovalToken(row.frozen_proposal),
           gate_trace_summary: row.gate_trace_summary,
           created_at: new Date(row.created_at).toISOString(),
           expires_at: new Date(row.expires_at).toISOString(),

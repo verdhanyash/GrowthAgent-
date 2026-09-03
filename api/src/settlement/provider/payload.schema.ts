@@ -45,19 +45,26 @@ export const OrderEntityZ = z.object({
   attempts: z.number().int().nonnegative(),
 });
 
-export const EventEnvelopeZ = z
-  .object({
-    entity: z.literal("event"),
-    account_id: z.string().optional(),
-    event: z.string().min(1),
-    contains: z.array(z.string()),
-    payload: z.object({
-      payment: z.object({ entity: PaymentEntityZ }).optional(),
-      order: z.object({ entity: OrderEntityZ }).optional(),
-    }),
-    created_at: z.number().int().positive(), // unix seconds — freshness anchor
-  })
-  .strict();
+/**
+ * The envelope is deliberately NOT `.strict()`. Razorpay owns this schema and
+ * adds top-level keys without notice; a strict envelope turns any such addition
+ * into a ProviderParseError for EVERY webhook, which strands captures in
+ * AWAITING_PAYMENT until they expire into MANUAL_REFUND_REQUIRED — a P0 outage
+ * triggered by someone else's release. Zod's default behaviour STRIPS unknown
+ * keys, which is what the module header promises: additive drift stays green,
+ * drift in the PINNED fields below still fails closed.
+ */
+export const EventEnvelopeZ = z.object({
+  entity: z.literal("event"),
+  account_id: z.string().optional(),
+  event: z.string().min(1),
+  contains: z.array(z.string()),
+  payload: z.object({
+    payment: z.object({ entity: PaymentEntityZ }).optional(),
+    order: z.object({ entity: OrderEntityZ }).optional(),
+  }),
+  created_at: z.number().int().positive(), // unix seconds — freshness anchor
+});
 
 /**
  * THE single verification path. `secrets` is [current, ...rotation] (V7:

@@ -2,7 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Explicit dark ground — the host never paints through us (§6 visual direction). */
-body {
-  @apply bg-bg text-ink font-mono antialiased;
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+  }
+
+  /* Focus is visible everywhere, and it is the same ring everywhere. */
+  :focus-visible {
+    @apply outline-none ring-1 ring-edge-bright;
+  }
+}
+
+/* Recessive scrollbars: the content is the thing, not its chrome. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #333333;
 }

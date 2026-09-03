@@ -21,6 +21,7 @@ import {
   CartMandateSchema,
   canonicalCartView,
   canonicalJson,
+  parsePaiseExact,
   signablePreimage,
   verifyCartMandate,
   type CartMandate,
@@ -44,7 +45,8 @@ export interface MandateBuilderDeps {
 
 interface SettleableRow {
   proposal_bytes: { lines?: Array<{ sku: string; qty: number; unit_price_paise: number }> };
-  approved_total_paise: number;
+  /** BIGINT column: node-pg hands it over as a string. */
+  approved_total_paise: string | number;
 }
 
 /** One-decimal display pct of the exact paise discount (0 when subtotal is 0). */
@@ -74,19 +76,34 @@ export async function buildCartMandate(deps: MandateBuilderDeps, txId: string): 
   if (lines.length === 0) return null;
 
   const gt = await deps.groundTruth();
-  const items: CartMandateItem[] = lines.map((l) => {
-    const item = gt.items.find((g) => g.sku_id === l.sku);
-    if (item === undefined) throw new Error(`MandateBuilder: unresolved sku ${l.sku}`);
+  // ONE item per SKU. The frozen settlement lines may carry the same SKU twice
+  // (mintSettleable's paise-remainder split), and the mandate is the buyer's
+  // human-readable statement of the cart — two rows for one bake at RAW list
+  // price would read as a duplicate charge. Quantities sum; the RAW list price
+  // is per-SKU anyway, so subtotal is unchanged either way.
+  const qtyBySku = new Map<string, number>();
+  for (const l of lines) qtyBySku.set(l.sku, (qtyBySku.get(l.sku) ?? 0) + l.qty);
+  const items: CartMandateItem[] = [...qtyBySku.entries()].map(([sku, qty]) => {
+    const item = gt.items.find((g) => g.sku_id === sku);
+    if (item === undefined) throw new Error(`MandateBuilder: unresolved sku ${sku}`);
     return {
-      sku: l.sku,
+      sku,
       title: item.name_raw, // RAW merchant name, never enrichment/LLM prose
-      qty: l.qty,
+      qty,
       unit_price_paise: item.list_price_paise, // RAW list price
     } as CartMandateItem;
   });
 
   const subtotal = items.reduce((s, it) => s + it.unit_price_paise * it.qty, 0);
-  const total = Number(tx.approved_total_paise); // authoritative — exactly what settlement charges
+  // BIGINT ⇒ string from node-pg. Exact parse, never Number(): a value that
+  // cannot round-trip would be signed into a mandate the buyer then verifies
+  // against a different number (audit 10.3).
+  const total = parsePaiseExact(tx.approved_total_paise); // authoritative — exactly what settlement charges
+  if (total === null) {
+    throw new Error(
+      `MandateBuilder: approved_total_paise "${String(tx.approved_total_paise)}" is not an exact paise value for ${txId}`,
+    );
+  }
   const discountPaise = subtotal - total;
   if (discountPaise < 0) {
     throw new Error(`MandateBuilder: net ${total} exceeds raw subtotal ${subtotal} for ${txId}`);

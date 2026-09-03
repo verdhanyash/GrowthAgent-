@@ -10,9 +10,17 @@
  * `?lastEventId=<headSeq>` so the server replays only what we missed (durable
  * events are deduped by seq in the reducer regardless).
  *
- * `active` is controlled by the caller (flipped false once the poll reports a
- * TERMINAL outcome) — that, plus a stream-derived terminal heuristic, stops the
+ * `active` is controlled by the caller (false when the transaction cannot be
+ * read at all) — that, plus a stream-derived terminal heuristic, stops the
  * reconnect loop cleanly when the tx is done.
+ *
+ * `alreadyTerminal` exists because replay is the common case, not the rare one:
+ * the SSE route replays the whole durable history for a tx before forwarding
+ * live frames, so opening it on a FINISHED transaction is how the trace screen
+ * reconstructs a past run. Once the server closes that stream there is nothing
+ * left to wait for, so a caller who already knows the tx is terminal sets this
+ * and the hook takes the history and stops instead of burning six reconnects
+ * ending in a spurious "stream lost".
  */
 import { useEffect, useReducer, useRef, useState } from "react";
 import { EVENT_NAMES } from "@growthagent/shared";
@@ -29,6 +37,8 @@ export type ConnStatus = "idle" | "connecting" | "open" | "reconnecting" | "clos
 
 export interface UseTransactionStreamOptions {
   active: boolean;
+  /** The poll already reported a terminal outcome: replay once, never re-dial. */
+  alreadyTerminal?: boolean;
   mintTicket: (txId: string) => Promise<string>;
   makeUrl?: (txId: string, ticket: string, lastEventId: number) => string;
   EventSourceCtor?: typeof EventSource;
@@ -49,6 +59,7 @@ export function useTransactionStream(
   opts: UseTransactionStreamOptions,
 ): UseTransactionStreamResult {
   const { active, mintTicket } = opts;
+  const alreadyTerminal = opts.alreadyTerminal ?? false;
   const makeUrl = opts.makeUrl ?? streamUrl;
   const ESCtor = opts.EventSourceCtor ?? (typeof EventSource !== "undefined" ? EventSource : undefined);
   const maxReconnects = opts.maxReconnects ?? 6;
@@ -92,6 +103,7 @@ export function useTransactionStream(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let disposed = false;
+    let opened = false;
 
     const onFrame = (e: MessageEvent): void => {
       const parsed = parseWireFrame(e.type, typeof e.data === "string" ? e.data : "");
@@ -104,7 +116,10 @@ export function useTransactionStream(
     };
 
     const scheduleReconnect = (): void => {
-      if (disposed || terminalRef.current) {
+      // A terminal tx has already handed over its whole history on the first
+      // connect; the server closing the socket is the end of the story, not a
+      // fault to retry.
+      if (disposed || terminalRef.current || (alreadyTerminal && opened)) {
         setStatus("closed");
         return;
       }
@@ -137,6 +152,7 @@ export function useTransactionStream(
       es = source;
       source.onopen = (): void => {
         attempt = 0;
+        opened = true;
         setStatus("open");
         setError(null);
       };
@@ -157,7 +173,7 @@ export function useTransactionStream(
       if (es) es.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [txId, active]);
+  }, [txId, active, alreadyTerminal]);
 
   return { state, status, reconnects, error };
 }

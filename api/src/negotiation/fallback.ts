@@ -39,6 +39,7 @@ interface PackIndex {
   priceBySku: Map<string, string>; // sku -> evidence id
   stockBySku: Map<string, string>;
   stockAvailable: Map<string, number>;
+  daysToExpiry: Map<string, number | null>;
   labelBySku: Map<string, string>;
   marginBySku: Map<string, number>;
   marginEntryIds: Map<string, string>;
@@ -51,6 +52,7 @@ function indexPack(pack: EvidencePackContainer): PackIndex {
     priceBySku: new Map(),
     stockBySku: new Map(),
     stockAvailable: new Map(),
+    daysToExpiry: new Map(),
     labelBySku: new Map(),
     marginBySku: new Map(),
     marginEntryIds: new Map(),
@@ -71,6 +73,10 @@ function indexPack(pack: EvidencePackContainer): PackIndex {
           ix.stockAvailable.set(
             e.sku,
             e.payload.kind === "STOCK" ? e.payload.payload.available_qty : 0,
+          );
+          ix.daysToExpiry.set(
+            e.sku,
+            e.payload.kind === "STOCK" ? e.payload.payload.days_to_expiry : null,
           );
         }
         break;
@@ -110,8 +116,64 @@ function indexPack(pack: EvidencePackContainer): PackIndex {
   return ix;
 }
 
-const inStock = (ix: PackIndex, sku: string): boolean =>
-  (ix.stockAvailable.get(sku) ?? 0) >= 1;
+/**
+ * Sellable = on the shelf AND not past its sell_by. Expiry belongs in this test
+ * because GK-EXPIRY-GUARD is a BLOCKER that is explicitly NOT escalable: a
+ * fallback line on an expired SKU is a guaranteed hard decline, so proposing
+ * one would make the degraded path strictly worse than proposing nothing. The
+ * pack's own STOCK entry carries days_to_expiry, so no new input is needed —
+ * and `0` still sells (the sell_by instant is the end of that day, matching
+ * gatekeeper/time.ts's strict "before now" boundary).
+ */
+const inStock = (ix: PackIndex, sku: string): boolean => {
+  if ((ix.stockAvailable.get(sku) ?? 0) < 1) return false;
+  const days = ix.daysToExpiry.get(sku);
+  return days === null || days === undefined || days >= 0;
+};
+
+/**
+ * Deterministic courtesy seed: the best in-stock SKU to open a basket with when
+ * the buyer named nothing we sell. Two ranks, tried in order, so a pack without
+ * sales aggregates still yields a cart:
+ *   1. SALES_STAT units_sold desc — the §6.3 rank, used whenever present.
+ *   2. MARGIN margin_pct desc, then contribution/unit desc — always present.
+ * Ties break on sku asc in both, so the choice is byte-stable per pack.
+ */
+function seedSku(ix: PackIndex, pack: EvidencePackContainer): string | null {
+  const bySales = pack.entries
+    .filter((e) => e.kind === "SALES_STAT" && e.sku !== null && inStock(ix, e.sku))
+    .map((e) => ({
+      sku: e.sku as string,
+      units: e.payload.kind === "SALES_STAT" ? e.payload.payload.units_sold : 0,
+    }))
+    .sort((a, b) => b.units - a.units || (a.sku < b.sku ? -1 : 1))[0];
+  if (bySales !== undefined) return bySales.sku;
+
+  const byMargin = [...ix.priceBySku.keys()]
+    .filter((sku) => inStock(ix, sku))
+    .map((sku) => ({
+      sku,
+      pct: ix.marginBySku.get(sku) ?? 0,
+      contribution: contributionOf(pack, ix, sku),
+    }))
+    .sort(
+      (a, b) => b.pct - a.pct || b.contribution - a.contribution || (a.sku < b.sku ? -1 : 1),
+    )[0];
+  return byMargin?.sku ?? null;
+}
+
+/** Contribution per unit from the MARGIN entry, else list − cost from PRICE. */
+function contributionOf(pack: EvidencePackContainer, ix: PackIndex, sku: string): number {
+  const mid = ix.marginEntryIds.get(sku);
+  const m = mid === undefined ? undefined : pack.entries.find((e) => e.id === mid);
+  if (m?.payload.kind === "MARGIN") return m.payload.payload.contribution_per_unit_paise;
+  const pid = ix.priceBySku.get(sku);
+  const pe = pid === undefined ? undefined : pack.entries.find((e) => e.id === pid);
+  if (pe?.payload.kind === "PRICE") {
+    return pe.payload.payload.list_price_paise - pe.payload.payload.cost_paise;
+  }
+  return 0;
+}
 
 /**
  * §6.3 normative algorithm. Returns null when NOTHING sellable exists — the
@@ -152,19 +214,22 @@ export function buildFallbackBundle(
     pushLine(item.sku, item.qty);
   }
 
-  // 2. Courtesy best-seller when nothing resolvable was requested.
+  // 2. Courtesy seed when nothing resolvable was requested.
+  //
+  //    Preferred rank is 90-day units_sold (SALES_STAT). That entry kind is
+  //    OPTIONAL in the pack — pipeline/evidence.ts emits PRICE/STOCK/MARGIN
+  //    (+OCCASION_FIT/PAIRING/CAMPAIGN_PRIORITY) and documents SALES_STAT as
+  //    out of scope until a sales-aggregate source lands. Ranking on it ALONE
+  //    therefore returned null for every free-text request against a real
+  //    pack — i.e. the LLM-unavailable path declined every cart as EMPTY_CART
+  //    even with a full shelf in stock. So the seed degrades one more step, to
+  //    the margin evidence the pack always carries: still ranked, still
+  //    deterministic, still "propose only what the pack contains", and never
+  //    reading gatekeeper config (§6.2).
   if (lines.length === 0) {
-    const salesRows = pack.entries
-      .filter((e) => e.kind === "SALES_STAT" && e.sku !== null)
-      .map((e) => ({
-        sku: e.sku as string,
-        units: e.payload.kind === "SALES_STAT" ? e.payload.payload.units_sold : 0,
-      }));
-    const seed = salesRows
-      .filter((r) => inStock(ix, r.sku))
-      .sort((a, b) => b.units - a.units || (a.sku < b.sku ? -1 : 1))[0];
-    if (!seed) return null; // pipeline → polite decline
-    pushLine(seed.sku, 1);
+    const seed = seedSku(ix, pack);
+    if (seed === null) return null; // pipeline → polite decline
+    pushLine(seed, 1);
   }
 
   const coreSkus = () => lines.map((l) => l.sku);

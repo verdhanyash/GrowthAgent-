@@ -5,7 +5,7 @@
  * the injection banner's detected→blocked upgrade, and the terminal outcome
  * branches (mandate arithmetic check, decline reasons, read-only escalation).
  */
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { RULE_IDS, type CartMandate, type ProposalStatusResponse } from "@growthagent/shared";
 import { NarrativeCard, toPlainText } from "./NarrativeCard.js";
@@ -43,31 +43,42 @@ describe("NarrativeCard — untrusted-text firewall", () => {
   });
 });
 
+const FAILED_DISCOUNT_CAP: Record<string, RuleView> = {
+  "GK-DISCOUNT-CAP": {
+    rule_id: "GK-DISCOUNT-CAP" as RuleView["rule_id"],
+    status: "FAIL",
+    severity: "BLOCKER",
+    expected: "<=10%",
+    actual: "50%",
+    human_message: "over cap",
+    reason_code: "OVER_DISCOUNT_CAP",
+    seq: 5,
+  },
+};
+
 describe("RuleTable", () => {
-  it("renders the full 16-rule roster even before any rule fires", () => {
+  it("defaults to the rules that actually ran, not the whole roster", () => {
+    render(<RuleTable rules={FAILED_DISCOUNT_CAP} />);
+    expect(screen.getByText("DISCOUNT-CAP")).toBeTruthy();
+    expect(screen.getByText(/1 of 16 invariants evaluated/)).toBeTruthy();
+    // The fifteen rules that never ran are not printed by default — reading a
+    // verdict should not mean scrolling past PENDING rows.
+    expect(screen.queryByText("MARGIN-FLOOR")).toBeNull();
+  });
+
+  it("still exposes the full 16-rule roster one click away (audit coverage)", () => {
     render(<RuleTable rules={{}} />);
-    // one <tr> per rule in tbody (+ the header row lives in thead)
+    fireEvent.click(screen.getByRole("tab", { name: /^All/ }));
     for (const id of RULE_IDS) {
       expect(screen.getByText(id.replace(/^GK-/, ""))).toBeTruthy();
     }
   });
 
-  it("shows the verdict for an evaluated rule", () => {
-    const rules: Record<string, RuleView> = {
-      "GK-DISCOUNT-CAP": {
-        rule_id: "GK-DISCOUNT-CAP" as RuleView["rule_id"],
-        status: "FAIL",
-        severity: "BLOCKER",
-        expected: "<=10%",
-        actual: "50%",
-        human_message: "over cap",
-        reason_code: "OVER_DISCOUNT_CAP",
-        seq: 5,
-      },
-    };
-    render(<RuleTable rules={rules} />);
+  it("shows the observed value and the limit for an evaluated rule", () => {
+    render(<RuleTable rules={FAILED_DISCOUNT_CAP} />);
     expect(screen.getByText("50%")).toBeTruthy();
-    expect(screen.getByText(/1 evaluated/)).toBeTruthy();
+    expect(screen.getByText("<=10%")).toBeTruthy();
+    expect(screen.getByText("fail")).toBeTruthy();
   });
 });
 

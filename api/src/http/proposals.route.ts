@@ -55,6 +55,20 @@ const PROP_STAGES = new Set([
   "TERMINAL",
 ]);
 
+/**
+ * Collapse `items_hint` into per-SKU quantities.
+ *
+ * The wire contract is `z.array(Sku)` and a buyer listing the same SKU twice
+ * means "two of them". Mapping each entry to `qty: 1` silently threw the second
+ * one away (the fallback bundler dedupes by SKU), so a request for two hampers
+ * was quietly answered with one.
+ */
+function itemsFromHint(skus: readonly string[]): { sku: string; qty: number }[] {
+  const counts = new Map<string, number>();
+  for (const sku of skus) counts.set(sku, (counts.get(sku) ?? 0) + 1);
+  return [...counts.entries()].map(([sku, qty]) => ({ sku, qty }));
+}
+
 /** Map the validated request onto the pipeline's RunInput (§5.1). */
 function toRunInput(
   txId: string,
@@ -65,7 +79,7 @@ function toRunInput(
   const cr = body.customer_request;
   const items =
     cr.items_hint !== undefined && cr.items_hint.length > 0
-      ? cr.items_hint.map((sku) => ({ sku, qty: 1 }))
+      ? itemsFromHint(cr.items_hint)
       : [{ label_free_text: cr.natural_language, qty: 1 }];
   return {
     tx_id: txId,

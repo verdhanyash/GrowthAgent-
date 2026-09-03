@@ -134,6 +134,42 @@ describe("useTransactionStream", () => {
     expect(result.current.state.stages).toHaveLength(1);
   });
 
+  it("replays a finished transaction's history and then stops, without retrying", async () => {
+    // The common case for the trace screen: the run is long over, so the only
+    // thing the socket is for is the durable replay the SSE route performs on
+    // connect. Once the server closes it, there is nothing to reconnect to.
+    const mintTicket = vi.fn(async () => "T");
+    const { result } = renderHook(() =>
+      useTransactionStream("tx_1", {
+        active: true,
+        alreadyTerminal: true,
+        mintTicket,
+        EventSourceCtor: ESCtor,
+      }),
+    );
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const es = FakeEventSource.last();
+    act(() => es.emitOpen());
+    await waitFor(() => expect(result.current.status).toBe("open"));
+
+    // Replayed history lands in state exactly like live frames do.
+    act(() => {
+      es.emit("stage_started", durableFrame(1, "stage_started", { stage: "INTAKE", attempt: 1 }));
+      es.emit("stage_completed", durableFrame(2, "stage_completed", { stage: "INTAKE", outcome: "OK", duration_ms: 8 }));
+    });
+    await waitFor(() => expect(result.current.state.eventCount).toBe(2));
+    expect(result.current.state.stages).toHaveLength(1);
+
+    // Server closes after the replay: settle, do not re-dial, do not report an
+    // error the operator would have to interpret.
+    act(() => es.emitError());
+    await waitFor(() => expect(result.current.status).toBe("closed"));
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(mintTicket).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toBeNull();
+  });
+
   it("registers a listener for every shared EVENT_NAMES entry", async () => {
     const mintTicket = vi.fn(async () => "T");
     renderHook(() => useTransactionStream("tx_1", { active: true, mintTicket, EventSourceCtor: ESCtor }));

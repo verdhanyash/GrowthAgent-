@@ -12,6 +12,7 @@ import {
   formatPaise,
   formatPct,
   mulDivRoundHalfUp,
+  parsePaiseExact,
   toBps,
 } from "@growthagent/shared";
 
@@ -126,5 +127,43 @@ describe("formatPaise / formatPct", () => {
   it("formats fixed-dp percents", () => {
     expect(formatPct(18.1987)).toBe("18.20%");
     expect(formatPct(25)).toBe("25.00%");
+  });
+});
+
+/**
+ * audit 10.3 — every BIGINT paise column arrives from node-pg as a STRING, and
+ * `Number(row.amount)` rounds silently above 2^53. The webhook handler compares
+ * a gateway amount against that value before moving money, so an approximate
+ * parse could make a mismatch read as a match.
+ */
+describe("parsePaiseExact", () => {
+  it("accepts the string form of any safe non-negative integer", () => {
+    expect(parsePaiseExact("0")).toBe(0);
+    expect(parsePaiseExact("69097")).toBe(69_097);
+    expect(parsePaiseExact("  500000  ")).toBe(500_000);
+    expect(parsePaiseExact("0069")).toBe(69); // leading zeros are still exact
+    expect(parsePaiseExact(String(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("accepts numbers and bigints that are already exact", () => {
+    expect(parsePaiseExact(1_234)).toBe(1_234);
+    expect(parsePaiseExact(0n)).toBe(0);
+    expect(parsePaiseExact(69_097n)).toBe(69_097);
+  });
+
+  it("REFUSES anything that would lose precision or is not paise", () => {
+    // 2^53 and beyond: Number() would round these into a neighbouring value.
+    expect(parsePaiseExact("9007199254740993")).toBeNull();
+    expect(parsePaiseExact("99999999999999999999")).toBeNull();
+    expect(parsePaiseExact(Number.MAX_SAFE_INTEGER + 2)).toBeNull();
+    // Not integer paise at all.
+    expect(parsePaiseExact("12.50")).toBeNull();
+    expect(parsePaiseExact("-1")).toBeNull();
+    expect(parsePaiseExact(-1)).toBeNull();
+    expect(parsePaiseExact("1e5")).toBeNull();
+    expect(parsePaiseExact("")).toBeNull();
+    expect(parsePaiseExact(null)).toBeNull();
+    expect(parsePaiseExact(undefined)).toBeNull();
+    expect(parsePaiseExact({})).toBeNull();
   });
 });

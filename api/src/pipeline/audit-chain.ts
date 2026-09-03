@@ -4,9 +4,12 @@
  * was final then; the CHAIN lands here.
  *
  * Invariants:
- *  - ONE writer. All appends funnel through an internal promise queue, so
- *    seq assignment and prev_hash linkage are strictly serialized no matter
- *    how many pipeline stages / webhook handlers append concurrently.
+ *  - ONE writer AT A TIME, enforced in POSTGRES, not in a JS variable. Every
+ *    append opens a transaction, takes the cluster-wide advisory lock below,
+ *    reads the true DB tail under it, then inserts. An in-process promise queue
+ *    still serializes this process's appends (cheap, avoids self-contention),
+ *    but correctness no longer depends on there being exactly one process:
+ *    N replicas allocate seq numbers without colliding on audit_log_pkey.
  *  - hash_n = sha256( (prev_hash ?? "GENESIS") + "\n" + canonicalJson(body_n) )
  *    where body = {seq, tx_id, ts, actor, rules_version, event, payload}.
  *  - seq is GLOBAL (not per-tx): it doubles as the SSE id so Last-Event-ID
@@ -73,6 +76,17 @@ function bodyOfRow(row: AuditRow): Record<string, unknown> {
 
 const GENESIS_SEQ = 0;
 
+/**
+ * Cluster-wide append lock (two-int32 form of pg_advisory_xact_lock). Held for
+ * the duration of ONE append transaction and released by COMMIT/ROLLBACK, so
+ * seq allocation and prev_hash linkage are serialized across every replica
+ * talking to this database — no migration, no head table, no leaked lock on
+ * crash (the backend dying ends the transaction). Values are the ASCII of
+ * "GA"/"LG" so the pair is recognisable in pg_locks.
+ */
+const AUDIT_LOCK_CLASS = 0x4741; // 'GA'
+const AUDIT_LOCK_OBJ = 0x4c47; // 'LG'
+
 function rowFromDb(r: Record<string, unknown>): AuditRow {
   return {
     seq: Number(r.seq),
@@ -92,9 +106,13 @@ function rowFromDb(r: Record<string, unknown>): AuditRow {
 }
 
 export class AuditChain {
+  /** LOCAL CACHE of the last row this process wrote — used by headSeq() for
+   *  heartbeats only. Appends re-read the authoritative tail from Postgres
+   *  under the advisory lock; never trust this value for linkage. */
   private tail: TailState = { lastSeq: GENESIS_SEQ, lastHash: null };
   private booted = false;
-  /** Strict serialization of every append (single-writer invariant). */
+  /** In-process serialization: keeps this replica from contending with itself
+   *  on the Postgres advisory lock. NOT the correctness mechanism. */
   private q: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly db: PgPool) {}
@@ -126,44 +144,80 @@ export class AuditChain {
 
   private async appendNow(input: AppendInput): Promise<AuditRow> {
     if (!this.booted) throw new Error("AuditChain.boot() must complete before append");
-    const seq = this.tail.lastSeq + 1;
-    const prevHash = this.tail.lastHash;
-    const body = {
-      seq,
-      tx_id: input.tx_id,
-      ts: input.ts,
-      actor: input.actor,
-      rules_version: input.rules_version,
-      event: input.event,
-      payload: input.payload,
-    };
-    const hash = hashEntry(prevHash, body);
-    await this.db.query(
-      `INSERT INTO audit_log
-         (seq, tx_id, ts, actor_id, actor_kind, actor_key_hash,
-          rules_version, event, payload, prev_hash, hash)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+      // Serialize seq allocation across every writer in the cluster. Released
+      // by COMMIT/ROLLBACK below — nothing to clean up if this process dies.
+      await client.query(`SELECT pg_advisory_xact_lock($1::int, $2::int)`, [
+        AUDIT_LOCK_CLASS,
+        AUDIT_LOCK_OBJ,
+      ]);
+      // Read the TRUE tail under the lock. The in-memory copy is a cache for
+      // headSeq() only; trusting it here is exactly the multi-instance bug.
+      const head = await client.query(`SELECT seq, hash FROM audit_log ORDER BY seq DESC LIMIT 1`);
+      const prev =
+        (head.rowCount ?? 0) > 0
+          ? {
+              lastSeq: Number((head.rows[0] as { seq: string | number }).seq),
+              lastHash: (head.rows[0] as { hash: string }).hash,
+            }
+          : { lastSeq: GENESIS_SEQ, lastHash: null as string | null };
+
+      const seq = prev.lastSeq + 1;
+      const prevHash = prev.lastHash;
+      const body = {
         seq,
-        input.tx_id,
-        input.ts,
-        input.actor.agent_id,
-        input.actor.kind,
-        input.actor.key_hash,
-        input.rules_version,
-        input.event,
-        JSON.stringify(input.payload),
-        prevHash,
-        hash,
-      ],
-    );
-    this.tail = { lastSeq: seq, lastHash: hash };
-    return { ...body, payload: input.payload, prev_hash: prevHash, hash };
+        tx_id: input.tx_id,
+        ts: input.ts,
+        actor: input.actor,
+        rules_version: input.rules_version,
+        event: input.event,
+        payload: input.payload,
+      };
+      const hash = hashEntry(prevHash, body);
+      await client.query(
+        `INSERT INTO audit_log
+           (seq, tx_id, ts, actor_id, actor_kind, actor_key_hash,
+            rules_version, event, payload, prev_hash, hash)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          seq,
+          input.tx_id,
+          input.ts,
+          input.actor.agent_id,
+          input.actor.kind,
+          input.actor.key_hash,
+          input.rules_version,
+          input.event,
+          JSON.stringify(input.payload),
+          prevHash,
+          hash,
+        ],
+      );
+      await client.query("COMMIT");
+      this.tail = { lastSeq: seq, lastHash: hash };
+      return { ...body, payload: input.payload, prev_hash: prevHash, hash };
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
-  /** Current head (what heartbeats report as head_seq). */
+  /** Head as last seen BY THIS PROCESS (what heartbeats report as head_seq).
+   *  With multiple replicas the true global head may be higher; use headSeqNow()
+   *  when the answer has to be authoritative. */
   headSeq(): number {
     return this.tail.lastSeq;
+  }
+
+  /** Authoritative global head straight from Postgres (any replica's writes). */
+  async headSeqNow(): Promise<number> {
+    const r = await this.db.query(`SELECT seq FROM audit_log ORDER BY seq DESC LIMIT 1`);
+    if ((r.rowCount ?? 0) === 0) return GENESIS_SEQ;
+    return Number((r.rows[0] as { seq: string | number }).seq);
   }
 
   /** Awaiting this resolves once every queued append has landed. */

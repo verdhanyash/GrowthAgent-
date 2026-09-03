@@ -29,16 +29,31 @@ export async function completeTransaction(db: PgPool, txId: string): Promise<voi
       (cas.rows[0] as { proposal_bytes: { lines?: { sku: string; qty: number }[] } })
         .proposal_bytes?.lines ?? []
     )) {
-      linesBySku.set(line.sku, line.qty);
+      // SUM, never overwrite: mintSettleable emits two sub-lines for one SKU
+      // when the approved net does not divide evenly by quantity, and a plain
+      // `set` would under-count expectedUnits into a false commit_shortfall.
+      linesBySku.set(line.sku, (linesBySku.get(line.sku) ?? 0) + line.qty);
     }
     for (const line of (
       await client.query(
         `UPDATE stock_reservations SET status = 'COMMITTED', committed_at = now()
           WHERE tx_id = $1 AND status = 'ACTIVE'
-          RETURNING sku, qty`,
+          RETURNING sku, qty, backordered`,
         [txId],
       )
-    ).rows as { sku: string; qty: number }[]) {
+    ).rows as { sku: string; qty: number; backordered: boolean }[]) {
+      if (line.backordered) {
+        // Made-to-order: no hold was ever taken and there is no shelf stock to
+        // draw down, so only the sales counter moves. `stock_qty - qty` would
+        // drive the row negative and trip the CHECK.
+        const b = await client.query(
+          `UPDATE inventory SET sold = sold + $1, updated_at = now() WHERE sku = $2`,
+          [line.qty, line.sku],
+        );
+        if ((b.rowCount ?? 0) === 0) throw new InvariantViolationError(txId, line.sku, "commit_backorder");
+        committedUnits += line.qty;
+        continue;
+      }
       // Hold→sale move: every clause guarded; any refusal aborts the WHOLE
       // transaction (latch stays open for the sweep's retry).
       const u = await client.query(

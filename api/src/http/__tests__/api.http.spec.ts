@@ -177,3 +177,66 @@ async function readStreamToEnd(url: string, timeoutMs = 8_000): Promise<string> 
     clearTimeout(timer);
   }
 }
+
+/**
+ * `items_hint` is `z.array(Sku)`, so a buyer listing the same SKU twice is
+ * asking for two of them. The route mapped each entry to `qty: 1` and the
+ * downstream bundler dedupes by SKU, so the second one was silently dropped —
+ * which is also why the high-value demo beat could never build its cart.
+ */
+describe("M8 buyer API — items_hint quantities", () => {
+  let h: ApiHarness;
+  beforeAll(async () => {
+    h = await startApi({ transport: HONEST });
+  });
+  afterAll(async () => {
+    await h.close();
+  });
+
+  it("collapses a repeated SKU into one line with the summed quantity", async () => {
+    const body = {
+      idempotency_key: "hint-qty-key-0001",
+      customer_request: {
+        natural_language: "Two hampers and a cake",
+        items_hint: ["HAMP-DIW-05", "HAMP-DIW-05", "CAKE-CHOC-500"],
+      },
+      untrusted: { customer_note: "Nothing untoward here." },
+    };
+    const post = await postProposal(h.base, BUYER_KEY, body);
+    expect(post.status).toBe(202);
+
+    // The claim row persists the buyer_request the pipeline actually received.
+    const deadline = Date.now() + 10_000;
+    let items: { sku?: string; qty: number }[] | undefined;
+    while (Date.now() < deadline) {
+      const r = await h.db.query(`SELECT request_bytes FROM proposal_txs WHERE tx_id=$1`, [post.json.tx_id]);
+      if ((r.rowCount ?? 0) > 0) {
+        items = (r.rows[0] as { request_bytes: { buyer_request: { items: { sku?: string; qty: number }[] } } })
+          .request_bytes.buyer_request.items;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(items).toEqual([
+      { sku: "HAMP-DIW-05", qty: 2 },
+      { sku: "CAKE-CHOC-500", qty: 1 },
+    ]);
+  });
+
+  it("falls back to the free-text label when no items_hint is given", async () => {
+    const post = await postProposal(h.base, BUYER_KEY, proposalBody("hint-none-key-0001"));
+    expect(post.status).toBe(202);
+    const deadline = Date.now() + 10_000;
+    let items: { label_free_text?: string; qty: number }[] | undefined;
+    while (Date.now() < deadline) {
+      const r = await h.db.query(`SELECT request_bytes FROM proposal_txs WHERE tx_id=$1`, [post.json.tx_id]);
+      if ((r.rowCount ?? 0) > 0) {
+        items = (r.rows[0] as { request_bytes: { buyer_request: { items: { label_free_text?: string; qty: number }[] } } })
+          .request_bytes.buyer_request.items;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(items).toEqual([{ label_free_text: "A birthday cake for this weekend", qty: 1 }]);
+  });
+});

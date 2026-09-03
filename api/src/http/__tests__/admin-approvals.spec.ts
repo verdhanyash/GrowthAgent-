@@ -7,6 +7,7 @@
  * terminal ESCALATION_REJECTED_BY_HUMAN, and the already-resolved / unknown
  * error paths. Resolution is detached, so each assertion polls the tx.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any -- spec asserts on loosely-typed JSON response bodies */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   startApi,
@@ -57,6 +58,29 @@ describe("M10 admin/approvals — inbox + approve/reject (§7.2)", () => {
   });
   afterAll(async () => {
     await h.close();
+  });
+
+  it("never ships the single-use approval token to the browser", async () => {
+    await escalate(h, "tok-redaction-1");
+    const { status, json } = await adminGet(h.base, "/v1/admin/approvals?status=PENDING");
+    expect(status).toBe(200);
+    expect(json.approvals.length).toBeGreaterThan(0);
+
+    // The frozen proposal is the whole SettleableProposal, so the cart must
+    // still be there — this is a redaction, not a truncation.
+    const snap = json.approvals[0].proposed_cart_snapshot;
+    expect(snap.total_amount_paise).toBeGreaterThan(0);
+    expect(Array.isArray(snap.lines)).toBe(true);
+
+    // …but the credential settle() consumes must not be.
+    expect(snap.approval_token).toBeUndefined();
+    expect(JSON.stringify(json)).not.toContain("approval_token");
+
+    // And it is still in the database, where the resolver reads it from.
+    const row = await h.db.query<{ token: string }>(
+      `SELECT approval_token AS token FROM approvals WHERE status = 'PENDING' LIMIT 1`,
+    );
+    expect(row.rows[0]?.token).toMatch(/^tok_/);
   });
 
   it("GET inbox lists the pending approval with its pinned rules_version", async () => {
