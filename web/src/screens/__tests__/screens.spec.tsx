@@ -17,6 +17,7 @@ import { TransactionsScreen } from "../TransactionsScreen.js";
 import { ApprovalsScreen } from "../ApprovalsScreen.js";
 import { PolicyScreen } from "../PolicyScreen.js";
 import { SimulateScreen } from "../SimulateScreen.js";
+import { GuideScreen } from "../GuideScreen.js";
 
 afterEach(cleanup);
 
@@ -115,3 +116,22 @@ describe("SimulateScreen", () => {
     expect(screen.getByRole("button", { name: /fault injection and reset/i })).toBeTruthy();
   });
 });
+
+describe("GuideScreen", () => {
+  it("renders the operations guide header and sub-navigation tabs", () => {
+    render(withProviders(<GuideScreen />));
+    expect(screen.getByRole("heading", { name: "Platform Operations Guide" })).toBeTruthy();
+    expect(screen.getByText(/1. Quickstart & Testing/i)).toBeTruthy();
+    expect(screen.getByText(/2. The 16 Invariants/i)).toBeTruthy();
+    expect(screen.getByText(/3. Trust Boundary & Security/i)).toBeTruthy();
+    expect(screen.getByText(/4. API & Webhook Specs/i)).toBeTruthy();
+  });
+
+  it("describes the five core demo beats in the quickstart", () => {
+    render(withProviders(<GuideScreen />));
+    expect(screen.getByText(/Beat 1: Well-Behaved Happy Path/i)).toBeTruthy();
+    expect(screen.getByText(/Beat 2: Adversarial Prompt Injection Caught/i)).toBeTruthy();
+    expect(screen.getByText(/Beat 3: High-Value Cart Escalation/i)).toBeTruthy();
+  });
+});
+

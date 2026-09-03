@@ -13,6 +13,7 @@
 import {
   AdminAgentsResponseSchema,
   AnalyticsResponseSchema,
+  AuditReplaySchema,
   TxListResponseSchema,
   AdminRulesResponseSchema,
   ApprovalResolvedSchema,
@@ -26,6 +27,7 @@ import {
   type AdminRulesResponse,
   type AnalyticsResponse,
   type AnalyticsWindow,
+  type AuditReplay,
   type OutcomeKind,
   type TxListResponse,
   type ApprovalRequest,
@@ -279,3 +281,13 @@ export async function fetchTransactions(opts: {
     (b) => TxListResponseSchema.parse(b),
   );
 }
+
+/** GET /v1/admin/audit/:txId/replay — tamper-evident hash-chain replay. */
+export async function fetchAuditReplay(txId: string, deep = false): Promise<AuditReplay> {
+  return adminRequest(
+    `/v1/admin/audit/${encodeURIComponent(txId)}/replay${deep ? "?deep=true" : ""}`,
+    { method: "GET" },
+    (b) => AuditReplaySchema.parse(b),
+  );
+}
+
