@@ -24,7 +24,7 @@
  */
 import { useEffect, useReducer, useRef, useState } from "react";
 import { EVENT_NAMES } from "@growthagent/shared";
-import { streamUrl } from "../lib/api.js";
+import { streamUrl, ApiError } from "../lib/api.js";
 import {
   initialTraceState,
   parseWireFrame,
@@ -142,7 +142,12 @@ export function useTransactionStream(
       try {
         ticket = await mintTicket(txId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "failed to mint stream ticket");
+        const msg = err instanceof Error ? err.message : "failed to mint stream ticket";
+        setError(msg);
+        if (err instanceof ApiError && (!err.retryable || err.status === 404 || err.status === 401)) {
+          setStatus("closed");
+          return;
+        }
         scheduleReconnect();
         return;
       }

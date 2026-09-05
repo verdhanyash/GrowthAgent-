@@ -162,7 +162,7 @@ export function Segmented<T extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="flex flex-wrap rounded-lg border border-edge bg-panel p-0.5"
+      className="flex flex-wrap rounded-lg border border-edge bg-panel p-0.5 segmented-group"
     >
       {options.map((o) => {
         const on = o.value === value;
@@ -174,8 +174,10 @@ export function Segmented<T extends string>({
             aria-selected={on}
             onClick={() => onChange(o.value)}
             className={clsx(
-              "rounded-md px-3 py-1.5 text-[12px] transition-colors",
-              on ? "bg-neutral-800 text-ink" : "text-mute hover:text-ink",
+              "rounded-md px-3 py-1.5 text-[12px] transition-colors segmented-btn",
+              on
+                ? "segmented-btn-active bg-neutral-800 text-ink shadow-sm"
+                : "text-mute hover:text-ink",
             )}
           >
             {o.label}

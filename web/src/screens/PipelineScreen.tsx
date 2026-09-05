@@ -83,14 +83,14 @@ export function PipelineScreen(): JSX.Element {
         </div>
 
         {/* Minimal Flow | 3D Toggle Pill */}
-        <div className="flex items-center rounded-lg border border-neutral-800 bg-[#0d0d0d] p-1">
+        <div className="flex items-center rounded-lg border border-neutral-800 bg-[#0d0d0d] p-1 segmented-group">
           <button
             type="button"
             onClick={() => setViewMode("graph")}
             className={`rounded-md px-3.5 py-1 text-[12px] font-medium transition-colors ${
               viewMode === "graph"
-                ? "bg-[#222222] text-white shadow-sm"
-                : "text-neutral-400 hover:text-neutral-200"
+                ? "segmented-btn-active bg-[#222222] text-white shadow-sm"
+                : "text-neutral-400 hover:text-neutral-200 segmented-btn"
             }`}
           >
             Flow
@@ -100,8 +100,8 @@ export function PipelineScreen(): JSX.Element {
             onClick={() => setViewMode("3d")}
             className={`rounded-md px-3.5 py-1 text-[12px] font-medium transition-colors ${
               viewMode === "3d"
-                ? "bg-[#222222] text-white shadow-sm"
-                : "text-neutral-400 hover:text-neutral-200"
+                ? "segmented-btn-active bg-[#222222] text-white shadow-sm"
+                : "text-neutral-400 hover:text-neutral-200 segmented-btn"
             }`}
           >
             3D
@@ -286,8 +286,8 @@ function RightSidebarInspector({
                   key={num}
                   className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] transition-all ${
                     isDone
-                      ? "border-neutral-500 bg-neutral-800 text-neutral-200"
-                      : "border-neutral-800 bg-transparent text-neutral-600"
+                      ? "stage-progress-dot-done border-neutral-500 bg-neutral-800 text-neutral-200"
+                      : "stage-progress-dot-pending border-neutral-800 bg-transparent text-neutral-600"
                   }`}
                 >
                   {isDone ? "✔" : "○"}
@@ -304,7 +304,7 @@ function RightSidebarInspector({
           {/* Latency Row */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-neutral-400">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-neutral-400 pipeline-metric-icon">
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
                   <polyline points="12 6 12 12 16 14" />
@@ -320,7 +320,7 @@ function RightSidebarInspector({
           {/* Rules Row */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-neutral-400">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-neutral-400 pipeline-metric-icon">
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polygon points="12 2 2 7 12 12 22 7 12 2" />
                   <polyline points="2 17 12 22 22 17" />
@@ -337,7 +337,7 @@ function RightSidebarInspector({
           {/* Status Row */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-neutral-400">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900 text-neutral-400 pipeline-metric-icon">
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                 </svg>
@@ -371,7 +371,7 @@ function RightSidebarInspector({
             <div
               key={i}
               style={{ height: `${h}%` }}
-              className="w-1.5 rounded-full bg-neutral-800/80 transition-all duration-300 hover:bg-neutral-500"
+              className="w-1.5 rounded-full bg-neutral-800/80 transition-all duration-300 hover:bg-neutral-500 waveform-bar"
             />
           ))}
         </div>

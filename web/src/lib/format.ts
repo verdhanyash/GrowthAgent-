@@ -64,3 +64,39 @@ export function bucketLabels(iso: string, bucket: "hour" | "day"): { short: stri
     full: d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }),
   };
 }
+
+/** Human-readable enterprise failure and decline reasons. */
+export function formatReason(reason: string | null | undefined): string {
+  if (!reason) return "—";
+  const normalized = reason.trim();
+  if (normalized === "demo_reset" || normalized === "SYSTEM_RESET") {
+    return "System Maintenance Abort";
+  }
+  if (normalized === "ESCALATION_REJECTED_BY_HUMAN") {
+    return "Supervisor Rejected";
+  }
+  if (normalized === "ESCALATION_EXPIRED") {
+    return "Supervisor Review Expired";
+  }
+  if (normalized === "INJECTION_BLOCKED") {
+    return "Security Guard: Prompt Injection";
+  }
+  if (normalized === "STOCK_EXHAUSTED") {
+    return "Inventory Depleted";
+  }
+  if (normalized === "CATALOG_MISMATCH") {
+    return "Catalog SKU Mismatch";
+  }
+  if (normalized === "TIMEOUT") {
+    return "Pipeline Gateway Timeout";
+  }
+  return normalized.replace(/^GK-/, "").replace(/_/g, " ");
+}
+
+/** Formats pipeline failure stages into natural English. */
+export function formatFailureStage(stage: string | null | undefined): string {
+  if (!stage) return "pipeline execution";
+  if (stage === "TERMINAL") return "pipeline execution";
+  return stage.replace(/_/g, " ").toLowerCase();
+}
+

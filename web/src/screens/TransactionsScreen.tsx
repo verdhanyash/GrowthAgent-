@@ -16,7 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { formatPaise, type OutcomeKind, type TxListRow } from "@growthagent/shared";
 import { fetchTransactions } from "../lib/admin-api.js";
-import { count, humanMs } from "../lib/format.js";
+import { count, humanMs, formatReason } from "../lib/format.js";
 import { OUTCOME_LABEL } from "../lib/viz.js";
 import {
   Chip,
@@ -129,7 +129,7 @@ export function TransactionsScreen(): JSX.Element {
                 header: "Reason",
                 cell: (r) => (
                   <span className="text-[11px] text-mute">
-                    {r.reason === null ? "—" : r.reason.replace(/^GK-/, "")}
+                    {formatReason(r.reason)}
                   </span>
                 ),
               },

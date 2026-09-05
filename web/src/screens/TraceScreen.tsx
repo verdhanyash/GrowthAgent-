@@ -13,9 +13,12 @@
  */
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useTransactionStream, type ConnStatus } from "../hooks/useTransactionStream.js";
 import { useProposalStatus } from "../hooks/useProposalStatus.js";
 import { mintStreamTicket } from "../lib/api.js";
+import { fetchTransactions } from "../lib/admin-api.js";
+import { humanMs, formatReason } from "../lib/format.js";
 import { Chip, Mono, Panel, Section } from "../components/ui.js";
 import { StageTimeline } from "../components/StageTimeline.js";
 import { RuleTable } from "../components/RuleTable.js";
@@ -56,6 +59,15 @@ export function TraceScreen({ txId }: { txId: string }): JSX.Element {
   const { state } = stream;
   const [showLog, setShowLog] = useState(false);
 
+  const adminTxQuery = useQuery({
+    queryKey: ["adminTx", txId],
+    queryFn: async () => {
+      const res = await fetchTransactions({ q: txId, limit: 1 });
+      return res.transactions.find((t) => t.tx_id === txId) ?? null;
+    },
+    enabled: poll.error !== null,
+  });
+
   return (
     <div className="space-y-10">
       {/* One header row: where you are, what it is, and whether it is live. */}
@@ -84,24 +96,90 @@ export function TraceScreen({ txId }: { txId: string }): JSX.Element {
       {/*
         The deep trace is BUYER-scoped: both the poll and the stream ticket
         require the agent key that owns this transaction. When the connected key
-        is not that key, there is nothing to render — so say so once, and stop.
-        Rendering "waiting for the first stage…" panels underneath an auth error
-        is the worst of both, because it reads as "data is coming" when none is.
+        is not that key, check if the control plane has the verified record.
       */}
       {poll.error !== null ? (
-        <div className="rounded-xl border border-bad/40 bg-bad/5 p-6">
-          <p className="text-[13px] text-bad-bright">Cannot read this transaction</p>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-ink-muted">
-            {poll.error.message}
-          </p>
-          <p className="mt-3 text-[11px] leading-relaxed text-mute">
-            The full trace is scoped to the agent that submitted the cart. The
-            outcome, policy verdict and settlement state for every run are on the{" "}
-            <Link to="/transactions" className="text-ink-muted underline hover:text-ink">
-              Transactions
-            </Link>{" "}
-            list, which reads the control plane rather than the buyer surface.
-          </p>
+        <div className="space-y-6">
+          {adminTxQuery.data ? (
+            <div className="rounded-xl border border-edge bg-panel p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge pb-4">
+                <div>
+                  <div className="text-[11px] font-mono text-mute uppercase tracking-wider">
+                    Control Plane Record
+                  </div>
+                  <h2 className="text-[16px] font-semibold text-ink mt-0.5">
+                    Transaction {adminTxQuery.data.tx_id}
+                  </h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  {adminTxQuery.data.outcome && (
+                    <Chip
+                      tone={
+                        adminTxQuery.data.outcome === "APPROVED"
+                          ? "ok"
+                          : adminTxQuery.data.outcome === "ESCALATED"
+                            ? "escalate"
+                            : adminTxQuery.data.outcome === "DECLINED"
+                              ? "bad"
+                              : "warn"
+                      }
+                    >
+                      {adminTxQuery.data.outcome}
+                    </Chip>
+                  )}
+                  <Chip tone="default">Stage: {adminTxQuery.data.stage}</Chip>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <div className="text-[11px] text-mute">Submitting Agent</div>
+                  <div className="font-mono text-[13px] text-ink mt-1 font-medium">
+                    {adminTxQuery.data.agent_id}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-mute">Failure / Verdict Reason</div>
+                  <div className="font-mono text-[13px] text-bad-bright font-semibold mt-1">
+                    {formatReason(adminTxQuery.data.reason)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-mute">Duration</div>
+                  <div className="font-mono text-[13px] text-ink mt-1">
+                    {adminTxQuery.data.duration_ms !== null
+                      ? humanMs(adminTxQuery.data.duration_ms)
+                      : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-mute">Settlement State</div>
+                  <div className="font-mono text-[13px] text-ink mt-1">
+                    {adminTxQuery.data.settlement_state ?? "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-warn/40 bg-warn/5 p-4 text-[12px] text-warn-bright leading-relaxed">
+                <strong>🔒 Scoped Buyer Trace:</strong> Live SSE streaming and real-time proposal polling require the private key of the submitting agent ({adminTxQuery.data.agent_id}). Above is the authoritative terminal outcome and settlement state recorded in the GrowthAgent database.
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-bad/40 bg-bad/5 p-6">
+              <p className="text-[13px] text-bad-bright">Cannot read this transaction</p>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-ink-muted">
+                {poll.error.message}
+              </p>
+              <p className="mt-3 text-[11px] leading-relaxed text-mute">
+                The full trace is scoped to the agent that submitted the cart. The
+                outcome, policy verdict and settlement state for every run are on the{" "}
+                <Link to="/transactions" className="text-ink-muted underline hover:text-ink">
+                  Transactions
+                </Link>{" "}
+                list, which reads the control plane rather than the buyer surface.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <TraceBody state={state} stream={stream} poll={poll} showLog={showLog} onToggleLog={setShowLog} />

@@ -38,34 +38,37 @@ However, deploying generative Large Language Models (LLMs) in direct control of 
 
 **GrowthAgent** solves this by establishing a strict, unbreachable trust boundary: **generative AI proposes deals, but a single deterministic, non-LLM Gatekeeper has the sole authority to approve, decline, or escalate transactions.**
 
-```
-   ┌────────────────────────────────────────────────────────┐
-   │             UNTRUSTED PROPOSAL SURFACE                 │
-   │  Conversational intake, prompt injection checks,       │
-   │  festive bundling & AI negotiation (NVIDIA NIM)        │
-   └───────────────────────────┬────────────────────────────┘
-                               │ Untrusted AI Proposal
-                               ▼
-   ┌────────────────────────────────────────────────────────┐
-   │           DETERMINISTIC GATEKEEPER (Zero AI)           │
-   │  • Zero I/O, Zero LLM, Zero clock drift                │
-   │  • Recomputes all prices from raw catalog ground truth │
-   │  • Strict integer paise arithmetic (no floats)         │
-   │  • 16 immutable merchant policy rules                  │
-   └───────────────────────────┬────────────────────────────┘
-                               │
-               ┌───────────────┴───────────────┐
-               ▼                               ▼
-       [ APPROVE / ESCALATE ]             [ DECLINE ]
-               │                               │
-               ▼                               ▼
-   ┌───────────────────────┐       ┌───────────────────────┐
-   │    SETTLEMENT RAIL    │       │     REJECTION LOG     │
-   │ • Deadlock-free holds │       │ Emits failure reasons │
-   │ • Razorpay Orders API │       │ to tamper-evident     │
-   │ • HMAC webhook verify │       │ audit hash chain      │
-   │ • CAS state machine   │       └───────────────────────┘
-   └───────────────────────┘
+```mermaid
+flowchart TD
+    classDef untrusted fill:#1c1917,stroke:#f59e0b,stroke-width:1.5px,color:#ffffff,rx:8px
+    classDef gatekeeper fill:#09090b,stroke:#dc2626,stroke-width:2px,color:#ffffff,rx:10px
+    classDef approve fill:#09090b,stroke:#10b981,stroke-width:1.5px,color:#ffffff,rx:8px
+    classDef escalate fill:#09090b,stroke:#f59e0b,stroke-width:1.5px,color:#ffffff,rx:8px
+    classDef decline fill:#09090b,stroke:#ef4444,stroke-width:1.5px,color:#ffffff,rx:8px
+
+    subgraph UntrustedZone ["⚠️ UNTRUSTED PROPOSAL SURFACE (AI & External Input)"]
+        direction TB
+        Intake["Buyer Conversational Intake<br/><small>Free-form notes, delivery requests, RFQs</small>"]:::untrusted
+        Tagger["Heuristic Regex Tagger<br/><small>Prompt injection pattern scanner</small>"]:::untrusted
+        NIM["NVIDIA NIM AI Negotiator<br/><small>Llama 3.3 70B · Proposed bundles & discounts</small>"]:::untrusted
+        Intake --> Tagger --> NIM
+    end
+
+    UntrustedZone -->|"Untrusted Candidate Cart<br/>(Zero financial authority)"| Gatekeeper
+
+    subgraph GatekeeperCore ["🛡️ DETERMINISTIC GATEKEEPER (Zero AI · Pure TypeScript)"]
+        Gatekeeper["<b>16 Immutable Invariant Formulas</b><br/><small>• Zero I/O · Zero clock drift · Recomputes prices from raw catalog ground truth<br/>• Strict integer paise arithmetic (no floats)</small>"]:::gatekeeper
+    end
+
+    Gatekeeper -->|"All 16 Invariants Pass"| Settle
+    Gatekeeper -->|"Soft Ceiling / Injection Alert"| Escalate
+    Gatekeeper -->|"Margin Floor / Cap Breached"| Decline
+
+    subgraph DecisionOutlets ["Action Rails & Cryptographic Ledger"]
+        Settle["✅ Settlement Rail<br/><small>• Deadlock-free sorted holds<br/>• Razorpay Orders API<br/>• Atomic CAS state transitions</small>"]:::approve
+        Escalate["⚠️ Human Approvals Inbox<br/><small>• Single-use HMAC capability token<br/>• Merchant manual review</small>"]:::escalate
+        Decline["❌ Cryptographic Rejection Log<br/><small>• Emits violation codes<br/>• SHA-256 hash-chain append</small>"]:::decline
+    end
 ```
 
 ### Core Tenets of the Solution
@@ -80,110 +83,136 @@ However, deploying generative Large Language Models (LLMs) in direct control of 
 
 ## 3. System Architecture & C4 Diagrams
 
-### C4 Level 1: System Context Diagram
+### Level 1: System Context Architecture
 
-The following C4 Context diagram shows how GrowthAgent fits into the commerce ecosystem:
+The system context diagram illustrates the boundary between untrusted external actors, the deterministic core, and external financial infrastructure:
 
 ```mermaid
-C4Context
-    title System Context Diagram for GrowthAgent
+flowchart TB
+    classDef actor fill:#18181b,stroke:#a1a1aa,stroke-width:1.5px,color:#ffffff,rx:8px
+    classDef system fill:#09090b,stroke:#dc2626,stroke-width:2px,color:#ffffff,rx:10px
+    classDef external fill:#18181b,stroke:#f59e0b,stroke-width:1.5px,color:#ffffff,rx:8px
 
-    Person(buyer, "AI Buyer Agent / Customer", "External autonomous agent or user seeking custom quotes and purchases.")
-    Person(merchant, "Store Operations / Merchant", "Monitors revenue, configures policy rules, and resolves escalations.")
-    
-    System(growthagent, "GrowthAgent System", "Autonomous AI growth engine with deterministic gatekeeper, settlement rails, and audit logging.")
-    
-    System_Ext(razorpay, "Razorpay Payment Gateway", "Handles real-world order creation, customer payment capture, and webhooks.")
-    System_Ext(nim, "NVIDIA NIM (Llama 3.3 70B)", "Generates natural language negotiations, intelligent bundles, and rationales.")
-    
-    Rel(buyer, growthagent, "Submits proposals & reads SSE streams", "HTTPS / REST / SSE")
-    Rel(merchant, growthagent, "Configures rules & reviews escalations", "Web Dashboard (HTTPS)")
-    Rel(growthagent, nim, "Requests proposal suggestions", "HTTPS / JSON Grammar")
-    Rel(growthagent, razorpay, "Creates orders & verifies webhooks", "HTTPS / HMAC-SHA256")
-    Rel(razorpay, growthagent, "Delivers payment capture events", "HTTPS Webhook")
+    subgraph Actors ["Actors & Client Applications"]
+        Buyer["🤖 Autonomous Buyer Agent<br/><small>External AI issuing custom cart RFQs</small>"]:::actor
+        Merchant["👤 Merchant Operations / Risk<br/><small>Reviews escalations & manages invariants</small>"]:::actor
+    end
+
+    GrowthAgent["🛡️ GrowthAgent Autonomous Core<br/><b>Deterministic Gatekeeper & Agentic Commerce Engine</b><br/><small>• Strict integer paise arithmetic · 16 invariant rules<br/>• Tamper-evident SHA-256 hash-chain audit ledger</small>"]:::system
+
+    subgraph ExternalInfra ["External Infrastructure"]
+        NIM["🧠 NVIDIA NIM (Llama 3.3 70B)<br/><small>Untrusted AI negotiation & bundling</small>"]:::external
+        Razorpay["💳 Razorpay Payment Gateway<br/><small>Orders API, capture & HMAC webhooks</small>"]:::external
+    end
+
+    Buyer -->|"1. Submits proposal & streams SSE trace"| GrowthAgent
+    Merchant -->|"2. Reviews approvals & tunes policy"| GrowthAgent
+    GrowthAgent -->|"3. Untrusted proposal suggestion"| NIM
+    GrowthAgent -->|"4. Mints order & reserves stock"| Razorpay
+    Razorpay -.->|"5. Payment capture webhook"| GrowthAgent
 ```
 
 ---
 
-### C4 Level 2: Container Diagram
+### Level 2: Container Architecture & Service Boundaries
+
+GrowthAgent is architectured as a modular monolith with strict separation between untrusted proposal intake, pure mathematical validation, and authoritative settlement:
 
 ```mermaid
-C4Container
-    title Container Diagram for GrowthAgent
+flowchart TB
+    classDef web fill:#09090b,stroke:#3b82f6,stroke-width:1.5px,color:#ffffff,rx:8px
+    classDef core fill:#09090b,stroke:#dc2626,stroke-width:2px,color:#ffffff,rx:8px
+    classDef shared fill:#18181b,stroke:#71717a,stroke-width:1.5px,stroke-dasharray: 4 4,color:#ffffff,rx:8px
+    classDef storage fill:#18181b,stroke:#10b981,stroke-width:1.5px,color:#ffffff,rx:8px
+    classDef ext fill:#18181b,stroke:#f59e0b,stroke-width:1.5px,color:#ffffff,rx:8px
 
-    Container(web, "Web Dashboard", "React 18, Vite, Tailwind CSS", "Mission-control dashboard: live trace, analytics, policy editor, approvals inbox, simulation lab.")
-    Container(api, "API & Pipeline Monolith", "Node.js 22, Express, TypeScript", "Exposes REST endpoints, SSE stream, pipeline orchestration, gatekeeper engine, and settlement rail.")
-    Container(shared, "Shared Contracts", "TypeScript, Zod", "Canonical schemas, integer money math, domain types, and error codes.")
-    
-    ContainerDb(postgres, "PostgreSQL 16", "Relational Database", "System of record: transactions, inventory, merchant rules, approvals, and cryptographic audit chain.")
-    ContainerDb(redis, "Redis 7", "In-Memory Store", "Distributed locks, idempotency keys, and stream coordination.")
-    
-    System_Ext(razorpay, "Razorpay Gateway", "Payment processing infrastructure.")
-    System_Ext(nim, "NVIDIA NIM", "Self-hosted or cloud LLM inference microservice.")
-    
-    Rel(web, api, "Fetches analytics, policies, streams traces", "HTTPS / SSE")
-    Rel(api, shared, "Imports schemas & validation")
-    Rel(web, shared, "Imports schemas & formatting")
-    Rel(api, postgres, "Reads/writes with transactional locks", "node-pg (TCP 15432)")
-    Rel(api, redis, "Atomic locks & caching", "ioredis (TCP 16379)")
-    Rel(api, nim, "Grammar-constrained inference", "HTTPS")
-    Rel(api, razorpay, "Orders API & Webhook verification", "HTTPS")
+    subgraph UI ["Presentation Layer"]
+        Web["💻 Control Plane Web Dashboard<br/><code>@growthagent/web</code><br/><small>React 18 · Vite · Tailwind · React Flow topology · 3D view</small>"]:::web
+    end
+
+    subgraph Contract ["Shared Types & Contracts"]
+        Shared["📦 Canonical Contracts<br/><code>@growthagent/shared</code><br/><small>Zod schemas · Integer paise math · Domain invariants</small>"]:::shared
+    end
+
+    subgraph Backend ["Core Monolith Engine · @growthagent/api"]
+        direction TB
+        Ingress["🚪 HTTP Ingress & Rate Limiter<br/><small>REST endpoints · SSE audit streams · Loopback guard</small>"]:::core
+        Pipe["🔄 Pipeline Orchestrator<br/><small>Tagger · Context builder · Citation auditor</small>"]:::core
+        Gate["⚔️ Pure Gatekeeper (Zero LLM)<br/><small>16 Invariant formulas · Catalog ground truth</small>"]:::core
+        Settle["💰 Settlement Rail<br/><small>Sorted row locks · Razorpay Orders API</small>"]:::core
+
+        Ingress --> Pipe --> Gate --> Settle
+    end
+
+    subgraph Storage ["Persistence & State Tier"]
+        Postgres[("🐘 PostgreSQL 16<br/><small>Transactions · Inventory · Audit chain</small>")]:::storage
+        Redis[("⚡ Redis 7<br/><small>Distributed locks · Idempotency</small>")]:::storage
+    end
+
+    subgraph ThirdParty ["External Services"]
+        NIM["🧠 NVIDIA NIM<br/><small>Llama 3.3 70B</small>"]:::ext
+        Rzp["💳 Razorpay Gateway<br/><small>Orders & Webhooks</small>"]:::ext
+    end
+
+    Web -->|"HTTPS / SSE"| Ingress
+    Web -.-> Shared
+    Backend -.-> Shared
+
+    Pipe -->|"Prompt & Note"| NIM
+    Settle -->|"Orders API"| Rzp
+    Settle -->|"Deadlock-Free Locks"| Postgres
+    Ingress -->|"Idempotency Check"| Redis
+    Backend -->|"Append-Only SHA-256"| Postgres
 ```
 
 ---
 
-### End-to-End Execution Sequence (Mermaid)
+### End-to-End Execution Sequence
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Buyer as External Buyer Agent
-    participant API as HTTP Ingress (/v1)
-    participant Pipe as Pipeline Orchestrator
-    participant LLM as Negotiation Agent (Llama 3.3)
-    participant Aud as Citation Auditor
-    participant Gate as Deterministic Gatekeeper
-    participant Settle as Settlement Engine
-    participant Rzp as Razorpay Gateway
-    participant DB as PostgreSQL & Audit Chain
+    actor Buyer as 🤖 Buyer Agent
+    participant API as 🚪 HTTP Ingress
+    participant Pipe as 🔄 Pipeline
+    participant NIM as 🧠 NVIDIA NIM
+    participant Gate as ⚔️ Gatekeeper
+    participant Settle as 💰 Settlement
+    participant DB as 🐘 PostgreSQL
 
+    Note over Buyer,DB: Phase 1: Intake & Idempotency
     Buyer->>API: POST /v1/carts/proposals (X-Agent-Key, Idempotency-Key)
-    API->>DB: Atomic claim idempotency & mint tx_id
+    API->>DB: Atomic claim idempotency & mint monotonic tx_id
     API-->>Buyer: 202 Accepted { tx_id, stream_url, poll_url }
 
-    API->>Pipe: Launch detached runPipeline(tx_id)
-    Pipe->>DB: Append audit event: intake_scanned
-    
-    Pipe->>Pipe: Heuristic Regex Tagger (detects injection patterns)
-    Pipe->>Pipe: Build Evidence Pack from raw catalog (ground truth)
-    
-    Pipe->>LLM: Send Frozen Prompt + Evidence Pack + Customer Note
-    LLM-->>Pipe: NegotiationProposal (items, suggested discount %, claims)
-    
-    Pipe->>Aud: Validate claims & numbers against Evidence Pack
-    Aud-->>Pipe: Filtered proposal (hallucinations stripped)
-    
-    Pipe->>Gate: Evaluate 16 Policy Rules (Zero I/O, Integer Paise)
-    Note over Gate: Discards LLM math.<br/>Recomputes gross, margin, and discount<br/>directly from catalog rows.
-    
-    alt Gatekeeper Verdict = APPROVE
-        Gate-->>Pipe: APPROVE (Signed Cart Mandate minted)
+    Note over Buyer,DB: Phase 2: Untrusted AI Negotiation & Citation Audit
+    API->>Pipe: Launch asynchronous pipeline
+    Pipe->>Pipe: Scan note with Regex Injection Tagger
+    Pipe->>NIM: Request proposal suggestions (Catalog ground truth)
+    NIM-->>Pipe: Untrusted candidate cart & promotional claims
+    Pipe->>Pipe: Citation audit (strips hallucinated SKUs & discounts)
+
+    Note over Buyer,DB: Phase 3: Pure Deterministic Verification
+    Pipe->>Gate: Evaluate 16 Invariant Formulas (Integer Paise)
+    Note over Gate: Discards LLM arithmetic.<br/>Recalculates every rupee from catalog.
+
+    alt Verdict: APPROVED
+        Gate-->>Pipe: APPROVED (Mint signed Cart Mandate)
         Pipe->>Settle: Execute settlement
-        Settle->>DB: Reserve stock (deadlock-free sorted row locks)
-        Settle->>Rzp: Create Razorpay Order (receipt: tx_id)
-        Rzp-->>Settle: razorpay_order_id
+        Settle->>DB: Reserve inventory (sorted row-level locks)
+        Settle->>Settle: Create Razorpay Order & mint receipt
         Settle->>DB: Transition state: AWAITING_PAYMENT
-    else Gatekeeper Verdict = ESCALATE
-        Gate-->>Pipe: ESCALATE (High-value or injection detected)
-        Pipe->>DB: Store pending approval & mint single-use HMAC token
-        Note over Pipe: Waits for merchant review in Approvals Inbox
-    else Gatekeeper Verdict = DECLINE
-        Gate-->>Pipe: DECLINE (Rule failure: Margin floor / Cap breached)
+    else Verdict: ESCALATED
+        Gate-->>Pipe: ESCALATED (High-value / Injection alert)
+        Pipe->>DB: Queue in Approvals Inbox with HMAC capability token
+    else Verdict: DECLINED
+        Gate-->>Pipe: DECLINED (Margin floor or discount cap breached)
         Pipe->>DB: Record terminal DECLINED state
     end
 
-    Pipe->>DB: Append audit event with SHA-256 prev_hash link
-    Pipe-->>Buyer: Stream audit update via Server-Sent Events (SSE)
+    Note over Buyer,DB: Phase 4: Cryptographic Audit & Stream
+    Pipe->>DB: Append SHA-256 audit entry (prev_hash linked)
+    Pipe-->>Buyer: Stream terminal outcome via SSE
 ```
 
 ---

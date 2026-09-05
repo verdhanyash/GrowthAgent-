@@ -1,18 +1,18 @@
 /**
  * App — the shell.
  *
- * Refined, pitch-black minimal fintech control plane.
+ * Refined, pitch-black minimal fintech control plane with Light/Dark Crimson theme support.
  * Features a subtle translucent glassmorphic navigation bar,
- * live system connectivity indicator, and dedicated views for:
+ * global live search palette, theme switcher, and dedicated views for:
  *  - Analytics (Operations metrics)
  *  - Pipeline (Interactive connected-graph topology)
  *  - Transactions (Execution ledger)
  *  - Approvals (Human escalation inbox)
- *  - Policy (Gatekeeper rules management)
+ *  - Policy (Gatekeeper rules management & Theme settings)
  *  - Simulate (Interactive attack and chaos harness)
  *  - Guide (How to use, architecture invariants & testing)
  */
-import React from "react";
+import React, { useEffect } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, Route, Routes, useParams } from "react-router-dom";
 import { AgentKeyGate } from "./components/AgentKeyGate.js";
@@ -24,7 +24,10 @@ import { PolicyScreen } from "./screens/PolicyScreen.js";
 import { SimulateScreen } from "./screens/SimulateScreen.js";
 import { TraceScreen } from "./screens/TraceScreen.js";
 import { GuideScreen } from "./screens/GuideScreen.js";
+import { SearchBar } from "./components/SearchBar.js";
+import { ThemeToggle } from "./components/ThemeToggle.js";
 import { fetchApprovals } from "./lib/admin-api.js";
+import { applyTheme, getStoredTheme } from "./lib/theme.js";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1 } },
@@ -44,8 +47,8 @@ function Tab({ to, label, badge }: NavItem): JSX.Element {
       className={({ isActive }) =>
         `relative flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all ${
           isActive
-            ? "bg-white/[0.08] text-white shadow-sm ring-1 ring-white/10"
-            : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
+            ? "nav-tab-active bg-white/[0.08] text-white shadow-sm ring-1 ring-white/10"
+            : "nav-tab-inactive text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
         }`
       }
     >
@@ -82,21 +85,16 @@ function HeaderNav(): JSX.Element {
   return (
     <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-black/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-[1360px] items-center justify-between px-6">
-        {/* Left: Brand + Live Pill */}
+        {/* Left: Brand logo (Live pill removed per request) */}
         <div className="flex items-center gap-3">
           <Link to="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-90">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white font-mono text-[11px] font-black text-black shadow-sm">
+            <span className="brand-logo-icon flex h-6 w-6 items-center justify-center rounded-md bg-white font-mono text-[11px] font-black text-black shadow-sm">
               G
             </span>
-            <span className="text-[15px] font-semibold tracking-tight text-white">
+            <span className="brand-logo-text text-[15px] font-semibold tracking-tight text-white">
               GrowthAgent
             </span>
           </Link>
-
-          <div className="flex items-center gap-1.5 rounded-full border border-neutral-800 bg-[#0d0d0d] px-2.5 py-0.5 text-[11px] font-medium text-neutral-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-ok" />
-            <span>Live</span>
-          </div>
         </div>
 
         {/* Center: Navigation Tabs */}
@@ -106,19 +104,10 @@ function HeaderNav(): JSX.Element {
           ))}
         </nav>
 
-        {/* Right: Search Icon + YP User Avatar */}
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-white/[0.06] hover:text-white"
-            title="Search"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </button>
-
+        {/* Right: Global Search Bar + Theme Switcher + YP User Avatar */}
+        <div className="flex items-center gap-2.5">
+          <SearchBar />
+          <ThemeToggle />
           <div className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 font-mono text-[11px] font-bold text-neutral-200">
             YP
           </div>
@@ -146,6 +135,11 @@ function TraceRoute(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
+  // Initialize stored theme on mount
+  useEffect(() => {
+    applyTheme(getStoredTheme());
+  }, []);
+
   return (
     <QueryClientProvider client={qc}>
       <Shell>

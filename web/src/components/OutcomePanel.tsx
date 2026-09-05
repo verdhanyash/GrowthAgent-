@@ -14,6 +14,7 @@ import {
   type ProposalStatusResponse,
 } from "@growthagent/shared";
 import { Chip, DataTable, KV, Mono, Panel } from "./ui.js";
+import { formatReason, formatFailureStage } from "../lib/format.js";
 
 function MandateCard({ m }: { m: CartMandate }): JSX.Element {
   const ok = arithmeticConsistent(m);
@@ -145,10 +146,10 @@ export function OutcomePanel({
       )}
 
       {out.outcome === "FAILED" && (
-        <div className="space-y-1 text-[12px]">
+        <div className="space-y-1.5 text-[12px]">
           <p className="text-ink-muted">
-            Failed at <span className="font-mono text-ink">{out.failure.stage}</span> —{" "}
-            {out.failure.reason}
+            Terminated during <span className="font-mono font-medium text-ink">{formatFailureStage(out.failure.stage)}</span> —{" "}
+            <span className="font-medium text-ink">{formatReason(out.failure.reason)}</span>
           </p>
           <p className="text-[11px] text-mute">
             {out.failure.retryable

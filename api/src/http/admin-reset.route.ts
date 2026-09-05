@@ -75,7 +75,7 @@ export function adminResetRoutes(deps: AdminResetRoutesDeps): Router {
       if (force) {
         await deps.db.query(`
           UPDATE stock_reservations SET status = 'EXPIRED', released_at = now() WHERE status = 'ACTIVE';
-          UPDATE proposal_txs SET stage = 'TERMINAL', outcome_json = '{"outcome":"FAILED","failure":{"stage":"TERMINAL","reason":"demo_reset","retryable":false}}' WHERE stage != 'TERMINAL';
+          UPDATE proposal_txs SET stage = 'TERMINAL', outcome_json = '{"outcome":"FAILED","failure":{"stage":"TERMINAL","reason":"SYSTEM_RESET","retryable":false}}' WHERE stage != 'TERMINAL';
           UPDATE transactions SET state = 'EXPIRED', expired_at = now() WHERE state IN ('PROPOSAL_APPROVED','STOCK_RESERVED','ORDER_CREATING','RZP_ORDER_CREATED','AWAITING_PAYMENT');
         `);
       }
@@ -83,7 +83,7 @@ export function adminResetRoutes(deps: AdminResetRoutesDeps): Router {
       // Expire pending approvals.
       await deps.db.query(`
         UPDATE approvals
-        SET status = 'RESOLVED', decision = 'REJECTED', decided_by = 'demo_reset', note = 'demo reset', resolved_at = now()
+        SET status = 'RESOLVED', decision = 'REJECTED', decided_by = 'SYSTEM_RESET', note = 'System maintenance reset', resolved_at = now()
         WHERE status = 'PENDING';
       `);
 

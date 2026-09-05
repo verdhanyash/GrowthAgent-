@@ -5,10 +5,11 @@
  * Stages are positioned along a 3D spline curve with data pulses moving
  * between nodes. Hover and click interactions select the real stage.
  */
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import type { StageId } from "./PipelineGraph.js";
 import type { AnalyticsResponse, TxListRow } from "@growthagent/shared";
+import { getStoredTheme, type ThemeMode } from "../lib/theme.js";
 
 interface Pipeline3DProps {
   analytics?: AnalyticsResponse;
@@ -44,6 +45,18 @@ export function Pipeline3D({
   onSelectStage,
 }: Pipeline3DProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isLight, setIsLight] = useState(() => getStoredTheme() === "light");
+
+  useEffect(() => {
+    const handleThemeChange = (e: Event) => {
+      const customEvent = e as CustomEvent<ThemeMode>;
+      if (customEvent.detail) {
+        setIsLight(customEvent.detail === "light");
+      }
+    };
+    window.addEventListener("growthagent:theme", handleThemeChange);
+    return () => window.removeEventListener("growthagent:theme", handleThemeChange);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -54,7 +67,7 @@ export function Pipeline3D({
 
     // Scene setup
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+    scene.background = new THREE.Color(isLight ? 0xfff8f8 : 0x000000);
 
     // Camera: Isometric perspective
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
@@ -76,7 +89,12 @@ export function Pipeline3D({
     scene.add(dirLight);
 
     // Subtle ground grid
-    const gridHelper = new THREE.GridHelper(36, 36, 0x222222, 0x111111);
+    const gridHelper = new THREE.GridHelper(
+      36,
+      36,
+      isLight ? 0xfca5a5 : 0x222222,
+      isLight ? 0xfecaca : 0x111111,
+    );
     gridHelper.position.y = -3;
     scene.add(gridHelper);
 
@@ -125,13 +143,13 @@ export function Pipeline3D({
     const curve = new THREE.CatmullRomCurve3(points);
 
     const tubeGeometry = new THREE.TubeGeometry(curve, 64, 0.08, 8, false);
-    const tubeMaterial = new THREE.MeshBasicMaterial({ color: 0x262626 });
+    const tubeMaterial = new THREE.MeshBasicMaterial({ color: isLight ? 0xfca5a5 : 0x262626 });
     const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
     scene.add(tube);
 
     // Flowing pulse particle
     const particleGeometry = new THREE.SphereGeometry(0.24, 16, 16);
-    const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const particleMaterial = new THREE.MeshBasicMaterial({ color: isLight ? 0xdc2626 : 0xffffff });
     const particle = new THREE.Mesh(particleGeometry, particleMaterial);
     scene.add(particle);
 
@@ -199,12 +217,20 @@ export function Pipeline3D({
         container.removeChild(renderer.domElement);
       }
     };
-  }, [selectedStage, selectedTx, onSelectStage]);
+  }, [selectedStage, selectedTx, onSelectStage, isLight]);
 
   return (
-    <div className="relative h-[560px] w-full overflow-hidden rounded-xl border border-edge bg-canvas shadow-inner">
+    <div
+      className={`relative h-[560px] w-full overflow-hidden rounded-xl border shadow-inner transition-colors ${
+        isLight ? "border-red-200 bg-white" : "border-edge bg-canvas"
+      }`}
+    >
       <div ref={containerRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
-      <div className="pointer-events-none absolute bottom-4 left-4 rounded-md border border-edge/80 bg-panel/80 px-2.5 py-1 text-[11px] text-mute backdrop-blur-sm">
+      <div
+        className={`pointer-events-none absolute bottom-4 left-4 rounded-md border px-2.5 py-1 text-[11px] backdrop-blur-sm ${
+          isLight ? "border-red-200 bg-white/90 text-neutral-600 shadow-sm" : "border-edge/80 bg-panel/80 text-mute"
+        }`}
+      >
         3D Isometric View · Click any 3D node block to inspect its telemetry
       </div>
     </div>

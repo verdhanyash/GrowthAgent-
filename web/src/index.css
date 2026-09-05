@@ -5,6 +5,12 @@
 @layer base {
   :root {
     color-scheme: dark;
+    --canvas-bg: #000000;
+    --panel-bg: #0a0a0a;
+    --edge-color: #1f1f1f;
+    --ink-color: #ffffff;
+    --ink-muted-color: #a3a3a3;
+    --mute-color: #878787;
   }
 
   body {
@@ -17,7 +23,7 @@
   }
 }
 
-/* Recessive scrollbars: the content is the thing, not its chrome. */
+/* Recessive scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -32,3 +38,328 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #333333;
 }
+
+/* ==========================================================================
+   Light Theme with Red Accents (.theme-light)
+   ========================================================================== */
+html.theme-light {
+  color-scheme: light;
+}
+
+html.theme-light body {
+  background-color: #fff8f8 !important;
+  color: #1c1917 !important;
+}
+
+html.theme-light header {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-bottom-color: #fecaca !important;
+  box-shadow: 0 1px 4px 0 rgba(220, 38, 38, 0.05);
+}
+
+/* Brand badge in Light Red mode */
+html.theme-light .brand-logo-icon {
+  background-color: #dc2626 !important;
+  color: #ffffff !important;
+}
+
+html.theme-light .brand-logo-text {
+  color: #991b1b !important;
+}
+
+/* Surfaces */
+html.theme-light .bg-canvas {
+  background-color: #fff8f8 !important;
+}
+
+html.theme-light .bg-panel {
+  background-color: #ffffff !important;
+  border-color: #fecaca !important;
+  box-shadow: 0 1px 3px 0 rgba(220, 38, 38, 0.06), 0 1px 2px -1px rgba(220, 38, 38, 0.04);
+}
+
+html.theme-light .bg-\[\#080808\],
+html.theme-light .bg-\[\#090909\],
+html.theme-light .bg-\[\#0a0a0a\],
+html.theme-light .bg-neutral-900\/40,
+html.theme-light .bg-neutral-900\/30 {
+  background-color: #ffffff !important;
+  border-color: #fecaca !important;
+  box-shadow: 0 1px 3px 0 rgba(220, 38, 38, 0.06);
+}
+
+html.theme-light .bg-\[\#0d0d0d\],
+html.theme-light .bg-\[\#0f0f0f\],
+html.theme-light .bg-neutral-900 {
+  background-color: #fff1f2 !important;
+  border-color: #fecaca !important;
+}
+
+html.theme-light .bg-black {
+  background-color: #ffffff !important;
+}
+
+/* Borders */
+html.theme-light .border-edge {
+  border-color: #fecaca !important;
+}
+
+html.theme-light .border-edge-bright {
+  border-color: #f87171 !important;
+}
+
+html.theme-light .border-neutral-800,
+html.theme-light .border-neutral-800\/80,
+html.theme-light .border-neutral-800\/60,
+html.theme-light .border-neutral-800\/90,
+html.theme-light .border-neutral-800\/50,
+html.theme-light .border-neutral-700,
+html.theme-light .border-white\/\[0\.08\],
+html.theme-light .border-white\/10,
+html.theme-light .border-white\/15,
+html.theme-light .border-white\/20,
+html.theme-light .border-white\/30 {
+  border-color: #fecaca !important;
+}
+
+/* Typography / Text colors */
+html.theme-light .text-ink {
+  color: #1c1917 !important;
+}
+
+html.theme-light .text-ink-muted {
+  color: #4b5563 !important;
+}
+
+html.theme-light .text-mute {
+  color: #6b7280 !important;
+}
+
+html.theme-light .text-white {
+  color: #0f172a !important;
+}
+
+html.theme-light .text-neutral-200,
+html.theme-light .text-neutral-300 {
+  color: #1e293b !important;
+}
+
+html.theme-light .text-neutral-400 {
+  color: #475569 !important;
+}
+
+html.theme-light .text-neutral-500 {
+  color: #64748b !important;
+}
+
+html.theme-light .text-neutral-600 {
+  color: #94a3b8 !important;
+}
+
+/* Nav Links & Tab Pills in Light Red */
+html.theme-light .nav-tab-inactive {
+  color: #64748b !important;
+}
+html.theme-light .nav-tab-inactive:hover {
+  background-color: #fee2e2 !important;
+  color: #dc2626 !important;
+}
+
+html.theme-light .nav-tab-active {
+  background-color: #fee2e2 !important;
+  color: #b91c1c !important;
+  border: 1px solid #fca5a5 !important;
+  box-shadow: 0 1px 2px 0 rgba(220, 38, 38, 0.1) !important;
+}
+
+/* Buttons in Light Red */
+html.theme-light button.bg-ink,
+html.theme-light .btn-primary {
+  background-color: #dc2626 !important;
+  color: #ffffff !important;
+}
+html.theme-light button.bg-ink:hover,
+html.theme-light .btn-primary:hover {
+  background-color: #b91c1c !important;
+}
+
+html.theme-light button.border-edge {
+  border-color: #fca5a5 !important;
+  color: #374151 !important;
+}
+html.theme-light button.border-edge:hover {
+  border-color: #dc2626 !important;
+  color: #dc2626 !important;
+  background-color: #fff1f2 !important;
+}
+
+/* Form inputs */
+html.theme-light input,
+html.theme-light select,
+html.theme-light textarea {
+  background-color: #ffffff !important;
+  border-color: #fca5a5 !important;
+  color: #111827 !important;
+}
+
+html.theme-light input::placeholder,
+html.theme-light textarea::placeholder {
+  color: #9ca3af !important;
+}
+
+html.theme-light input:focus,
+html.theme-light select:focus,
+html.theme-light textarea:focus {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 1px #dc2626 !important;
+}
+
+/* Table header & row hover */
+html.theme-light thead {
+  background-color: #fff1f2 !important;
+  border-bottom-color: #fecaca !important;
+}
+html.theme-light thead th {
+  color: #881337 !important;
+}
+html.theme-light tbody tr:hover {
+  background-color: #fff5f5 !important;
+}
+
+/* Segmented controls / tabs */
+html.theme-light .bg-edge,
+html.theme-light [role="radiogroup"] {
+  background-color: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+}
+html.theme-light [role="radiogroup"] button {
+  color: #4b5563 !important;
+}
+html.theme-light [role="radiogroup"] button[aria-checked="true"],
+html.theme-light [role="radiogroup"] button.bg-panel {
+  background-color: #ffffff !important;
+  color: #dc2626 !important;
+  box-shadow: 0 1px 2px 0 rgba(220, 38, 38, 0.15) !important;
+}
+
+/* Search dropdown palette in Light Red */
+html.theme-light .bg-\[\#0c0c0c\] {
+  background-color: #ffffff !important;
+  border-color: #fca5a5 !important;
+  box-shadow: 0 10px 25px -5px rgba(220, 38, 38, 0.15), 0 8px 10px -6px rgba(220, 38, 38, 0.1) !important;
+}
+
+/* Header theme toggle button */
+html.theme-light .theme-toggle-btn {
+  border-color: #fca5a5 !important;
+  background-color: #ffffff !important;
+  color: #dc2626 !important;
+  box-shadow: 0 1px 2px 0 rgba(220, 38, 38, 0.06) !important;
+}
+html.theme-light .theme-toggle-btn:hover {
+  border-color: #dc2626 !important;
+  background-color: #fff1f2 !important;
+}
+
+/* Segmented controls / tabs in Light mode */
+html.theme-light .segmented-group,
+html.theme-light [role="tablist"] {
+  background-color: #ffffff !important;
+  border-color: #fca5a5 !important;
+  box-shadow: 0 1px 3px 0 rgba(220, 38, 38, 0.08) !important;
+}
+
+html.theme-light .segmented-btn,
+html.theme-light [role="tab"] {
+  color: #4b5563 !important;
+}
+
+html.theme-light .segmented-btn:hover,
+html.theme-light [role="tab"]:hover {
+  color: #dc2626 !important;
+  background-color: #fff1f2 !important;
+}
+
+/* Active Segmented button & overrides for dark black blocks across all tabs */
+html.theme-light .segmented-btn-active,
+html.theme-light [role="tab"][aria-selected="true"],
+html.theme-light .bg-neutral-800,
+html.theme-light .bg-\[\#222222\],
+html.theme-light .bg-\[\#222\] {
+  background-color: #dc2626 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 4px 0 rgba(220, 38, 38, 0.3) !important;
+  font-weight: 600 !important;
+}
+
+html.theme-light .segmented-btn-active span,
+html.theme-light [role="tab"][aria-selected="true"] span,
+html.theme-light .bg-neutral-800 span {
+  color: #fee2e2 !important;
+}
+
+/* Pipeline tab specific overrides */
+html.theme-light .stage-progress-dot-done {
+  background-color: #fee2e2 !important;
+  border-color: #f87171 !important;
+  color: #dc2626 !important;
+  font-weight: 700 !important;
+}
+
+html.theme-light .stage-progress-dot-pending {
+  border-color: #fecaca !important;
+  color: #9ca3af !important;
+  background-color: transparent !important;
+}
+
+html.theme-light .pipeline-metric-icon {
+  background-color: #fff1f2 !important;
+  border-color: #fecaca !important;
+  color: #dc2626 !important;
+}
+
+html.theme-light .waveform-bar {
+  background-color: #fca5a5 !important;
+}
+
+html.theme-light .waveform-bar:hover {
+  background-color: #dc2626 !important;
+}
+
+/* Circular Pipeline nodes in Light Mode */
+html.theme-light .pipeline-node {
+  background-color: #ffffff !important;
+  border-color: #fca5a5 !important;
+  box-shadow: 0 2px 8px 0 rgba(220, 38, 38, 0.08) !important;
+}
+
+html.theme-light .pipeline-node:hover {
+  border-color: #dc2626 !important;
+  background-color: #fff1f2 !important;
+}
+
+html.theme-light .pipeline-node-gatekeeper {
+  border-color: #dc2626 !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 0 20px 0 rgba(220, 38, 38, 0.25) !important;
+}
+
+html.theme-light .pipeline-node-selected {
+  border-color: #dc2626 !important;
+  background-color: #fee2e2 !important;
+  box-shadow: 0 0 24px 0 rgba(220, 38, 38, 0.35) !important;
+}
+
+html.theme-light .pipeline-node span {
+  color: #374151 !important;
+}
+
+html.theme-light .pipeline-node:hover span,
+html.theme-light .pipeline-node-gatekeeper span {
+  color: #dc2626 !important;
+}
+
+html.theme-light .pipeline-node-selected span {
+  color: #991b1b !important;
+}
+

@@ -8,7 +8,7 @@
  * beside Analytics — that is one fewer thing in the nav and one less place to
  * look. The revoke control itself is unchanged; it is a real security action.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAgents,
@@ -36,12 +36,15 @@ import {
   inputClass,
 } from "../components/ui.js";
 
-type Tab = "RULES" | "HISTORY" | "ACCESS";
+import { applyTheme, getStoredTheme, type ThemeMode } from "../lib/theme.js";
+
+type Tab = "RULES" | "HISTORY" | "ACCESS" | "THEME";
 
 const TABS: readonly { value: Tab; label: string }[] = [
   { value: "RULES", label: "Rules" },
   { value: "HISTORY", label: "Changelog" },
   { value: "ACCESS", label: "Access" },
+  { value: "THEME", label: "Theme" },
 ];
 
 export function PolicyScreen(): JSX.Element {
@@ -94,6 +97,8 @@ export function PolicyScreen(): JSX.Element {
         ))}
 
       {tab === "ACCESS" && <AccessTab agents={agents} />}
+
+      {tab === "THEME" && <ThemeTab />}
     </Page>
   );
 }
@@ -367,3 +372,111 @@ function AccessTab({ agents }: { agents: readonly AdminAgent[] | undefined }): J
     </Section>
   );
 }
+
+/* --------------------------------- theme ---------------------------------- */
+
+function ThemeTab(): JSX.Element {
+  const [theme, setTheme] = useState<ThemeMode>(getStoredTheme);
+
+  useEffect(() => {
+    const handleThemeChange = (e: Event) => {
+      const customEvent = e as CustomEvent<ThemeMode>;
+      if (customEvent.detail) {
+        setTheme(customEvent.detail);
+      }
+    };
+    window.addEventListener("growthagent:theme", handleThemeChange);
+    return () => window.removeEventListener("growthagent:theme", handleThemeChange);
+  }, []);
+
+  const selectTheme = (mode: ThemeMode) => {
+    setTheme(mode);
+    applyTheme(mode);
+  };
+
+  return (
+    <div className="space-y-6">
+      <Section
+        title="Interface Theme & Appearance"
+        hint="Choose between Dark Mode (minimal pitch-black fintech) and Light Mode (vibrant Crimson Red)."
+      >
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {/* Card 1: Dark Mode */}
+          <div
+            onClick={() => selectTheme("dark")}
+            className={`cursor-pointer rounded-2xl border p-6 transition-all ${
+              theme === "dark"
+                ? "border-white bg-[#0f0f0f] shadow-lg ring-2 ring-white/20"
+                : "border-neutral-800 bg-[#090909] opacity-75 hover:opacity-100 hover:border-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black border border-neutral-700 font-mono text-[12px] text-white">
+                  🌙
+                </span>
+                <h4 className="text-[15px] font-semibold text-white">Dark Mode</h4>
+              </div>
+              {theme === "dark" && (
+                <span className="rounded-full bg-ok/10 border border-ok/30 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-ok-bright">
+                  Active
+                </span>
+              )}
+            </div>
+
+            <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
+              The stealth fintech control plane. Designed for mission-critical operations with deep pitch-black surfaces, subtle hairlines, and glowing telemetry indicators.
+            </p>
+
+            <div className="mt-5 flex items-center gap-2 pt-4 border-t border-neutral-800">
+              <span className="h-4 w-4 rounded-full bg-[#000000] border border-neutral-700" title="Canvas (#000000)" />
+              <span className="h-4 w-4 rounded-full bg-[#0a0a0a] border border-neutral-700" title="Panel (#0a0a0a)" />
+              <span className="h-4 w-4 rounded-full bg-[#0ca30c]" title="Ok (#0ca30c)" />
+              <span className="h-4 w-4 rounded-full bg-[#fab219]" title="Escalate (#fab219)" />
+              <span className="h-4 w-4 rounded-full bg-[#d03b3b]" title="Bad (#d03b3b)" />
+              <span className="ml-auto font-mono text-[11px] text-neutral-400">#000000 Pitch Black</span>
+            </div>
+          </div>
+
+          {/* Card 2: Light Mode */}
+          <div
+            onClick={() => selectTheme("light")}
+            className={`cursor-pointer rounded-2xl border p-6 transition-all ${
+              theme === "light"
+                ? "border-red-600 bg-white shadow-xl ring-2 ring-red-500/30"
+                : "border-neutral-800 bg-[#090909] opacity-75 hover:opacity-100 hover:border-neutral-700"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 font-mono text-[12px] text-white">
+                  ☀️
+                </span>
+                <h4 className="text-[15px] font-semibold text-white">Light Mode</h4>
+              </div>
+              {theme === "light" && (
+                <span className="rounded-full bg-red-100 border border-red-300 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-red-700">
+                  Active
+                </span>
+              )}
+            </div>
+
+            <p className="mt-3 text-[12px] leading-relaxed text-neutral-400">
+              Clean, crisp daytime mode featuring vibrant Crimson Red primary accents, rose hairlines, and high-contrast charcoal typography for optimal readability.
+            </p>
+
+            <div className="mt-5 flex items-center gap-2 pt-4 border-t border-neutral-800">
+              <span className="h-4 w-4 rounded-full bg-[#fff8f8] border border-red-200" title="Canvas (#fff8f8)" />
+              <span className="h-4 w-4 rounded-full bg-[#ffffff] border border-red-200" title="Panel (#ffffff)" />
+              <span className="h-4 w-4 rounded-full bg-[#dc2626]" title="Crimson Primary (#dc2626)" />
+              <span className="h-4 w-4 rounded-full bg-[#fca5a5]" title="Rose Border (#fca5a5)" />
+              <span className="h-4 w-4 rounded-full bg-[#1c1917]" title="Ink (#1c1917)" />
+              <span className="ml-auto font-mono text-[11px] text-neutral-400">#DC2626 Crimson Red</span>
+            </div>
+          </div>
+        </div>
+      </Section>
+    </div>
+  );
+}
+

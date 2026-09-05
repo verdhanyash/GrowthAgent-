@@ -9,12 +9,11 @@
  *  - Interactive hover tooltips & click inspection
  *  - Powered 100% by real database telemetry
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   Handle,
   Position,
   type NodeProps,
@@ -28,6 +27,7 @@ import {
   type AdminRulesResponse,
   type TxListRow,
 } from "@growthagent/shared";
+import { getStoredTheme, type ThemeMode } from "../lib/theme.js";
 
 export type StageId =
   | "buyer"
@@ -164,11 +164,11 @@ function CircularPipelineNode({ data, selected }: NodeProps<Node<CircularNodeDat
 
       {/* Outer subtle glow / radiant halo for checkpoint or selected node */}
       <div
-        className={`relative flex items-center justify-center rounded-full transition-all duration-300 ${sizeClass} ${
+        className={`pipeline-node relative flex items-center justify-center rounded-full transition-all duration-300 ${sizeClass} ${
           selected
-            ? "border-2 border-white bg-black shadow-[0_0_30px_rgba(255,255,255,0.25)] ring-1 ring-white/40"
+            ? "pipeline-node-selected border-2 border-white bg-black shadow-[0_0_30px_rgba(255,255,255,0.25)] ring-1 ring-white/40"
             : isGatekeeper
-            ? "border-2 border-white/90 bg-black shadow-[0_0_24px_rgba(255,255,255,0.18)]"
+            ? "pipeline-node-gatekeeper border-2 border-white/90 bg-black shadow-[0_0_24px_rgba(255,255,255,0.18)]"
             : "border border-neutral-700/80 bg-[#080808] hover:border-neutral-400 hover:bg-[#111111]"
         }`}
       >
@@ -234,6 +234,19 @@ export function PipelineGraph({
   selectedStage,
   onSelectStage,
 }: PipelineGraphProps): JSX.Element {
+  const [isLight, setIsLight] = useState(() => getStoredTheme() === "light");
+
+  useEffect(() => {
+    const handleThemeChange = (e: Event) => {
+      const customEvent = e as CustomEvent<ThemeMode>;
+      if (customEvent.detail) {
+        setIsLight(customEvent.detail === "light");
+      }
+    };
+    window.addEventListener("growthagent:theme", handleThemeChange);
+    return () => window.removeEventListener("growthagent:theme", handleThemeChange);
+  }, []);
+
   // Extract stage latencies from real analytics
   const latencies = useMemo(() => {
     const m = new Map<string, number>();
@@ -392,10 +405,10 @@ export function PipelineGraph({
     const isEscalated = selectedTx?.outcome === "ESCALATED";
     const isApproved = selectedTx?.outcome === "APPROVED";
 
-    const defaultEdgeStyle = { stroke: "#333333", strokeWidth: 1.5 };
-    const activeEdgeStyle = { stroke: "#ffffff", strokeWidth: 2 };
-    const okEdgeStyle = { stroke: "#0ca30c", strokeWidth: 2 };
-    const warnEdgeStyle = { stroke: "#fab219", strokeWidth: 2 };
+    const defaultEdgeStyle = { stroke: isLight ? "#fca5a5" : "#333333", strokeWidth: 1.5 };
+    const activeEdgeStyle = { stroke: isLight ? "#dc2626" : "#ffffff", strokeWidth: 2 };
+    const okEdgeStyle = { stroke: isLight ? "#16a34a" : "#0ca30c", strokeWidth: 2 };
+    const warnEdgeStyle = { stroke: isLight ? "#ea580c" : "#fab219", strokeWidth: 2 };
 
     return [
       {
@@ -452,10 +465,14 @@ export function PipelineGraph({
         style: isEscalated ? warnEdgeStyle : defaultEdgeStyle,
       },
     ];
-  }, [selectedTx]);
+  }, [selectedTx, isLight]);
 
   return (
-    <div className="relative h-[560px] w-full overflow-hidden rounded-2xl border border-edge bg-black shadow-2xl">
+    <div
+      className={`relative h-[560px] w-full overflow-hidden rounded-2xl border shadow-2xl transition-colors ${
+        isLight ? "border-red-200 bg-white shadow-xl" : "border-edge bg-black"
+      }`}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -466,22 +483,26 @@ export function PipelineGraph({
         maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#161616" gap={22} size={1} />
+        <Background color={isLight ? "#fecaca" : "#161616"} gap={22} size={1} />
         <Controls
           position="bottom-left"
           showInteractive={false}
-          className="!border !border-edge !bg-[#0a0a0a] !fill-ink !text-ink !shadow-2xl [&>button]:!border-b [&>button]:!border-edge [&>button]:!bg-[#0a0a0a] [&>button]:!text-neutral-400 hover:[&>button]:!text-white"
-        />
-        <MiniMap
-          position="bottom-right"
-          nodeColor={(n) => (n.id === selectedStage ? "#ffffff" : "#222222")}
-          maskColor="rgba(0, 0, 0, 0.85)"
-          className="!border !border-edge !bg-[#0a0a0a]"
+          className={
+            isLight
+              ? "!border !border-red-200 !bg-white !fill-neutral-700 !text-neutral-700 !shadow-md [&>button]:!border-b [&>button]:!border-red-100 [&>button]:!bg-white [&>button]:!text-neutral-700 hover:[&>button]:!text-red-600"
+              : "!border !border-edge !bg-[#0a0a0a] !fill-ink !text-ink !shadow-2xl [&>button]:!border-b [&>button]:!border-edge [&>button]:!bg-[#0a0a0a] [&>button]:!text-neutral-400 hover:[&>button]:!text-white"
+          }
         />
       </ReactFlow>
 
       {/* Floating minimal hint */}
-      <div className="pointer-events-none absolute top-4 left-4 rounded-full border border-white/10 bg-black/80 px-3 py-1 text-[10px] font-mono text-neutral-400 backdrop-blur-md">
+      <div
+        className={
+          isLight
+            ? "pointer-events-none absolute top-4 left-4 rounded-full border border-red-200 bg-white/95 px-3 py-1 text-[10px] font-mono text-neutral-600 shadow-sm backdrop-blur-md"
+            : "pointer-events-none absolute top-4 left-4 rounded-full border border-white/10 bg-black/80 px-3 py-1 text-[10px] font-mono text-neutral-400 backdrop-blur-md"
+        }
+      >
         ● Hover for telemetry · Click node to inspect details
       </div>
     </div>

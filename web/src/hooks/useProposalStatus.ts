@@ -7,7 +7,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import type { ProposalStatusResponse } from "@growthagent/shared";
-import { pollProposal } from "../lib/api.js";
+import { pollProposal, ApiError } from "../lib/api.js";
 
 export interface UseProposalStatusResult {
   data: ProposalStatusResponse | null;
@@ -23,12 +23,21 @@ export function useProposalStatus(txId: string | null): UseProposalStatusResult 
     queryKey: ["proposal", txId],
     queryFn: () => pollProposal(txId as string),
     enabled: txId !== null,
-    // Poll until terminal, then stop. `refetchInterval` receives the query and
-    // returns false to halt once the body is TERMINAL.
-    refetchInterval: (query) => (query.state.data?.status === "TERMINAL" ? false : POLL_MS),
-    refetchIntervalInBackground: true,
+    // Poll until terminal, then stop. Stop polling immediately if an error occurs.
+    refetchInterval: (query) => {
+      if (query.state.data?.status === "TERMINAL" || query.state.error !== null) {
+        return false;
+      }
+      return POLL_MS;
+    },
+    refetchIntervalInBackground: false,
     staleTime: 0,
-    retry: 2,
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && (!error.retryable || error.status === 404)) {
+        return false;
+      }
+      return failureCount < 1;
+    },
   });
 
   const data = q.data ?? null;
